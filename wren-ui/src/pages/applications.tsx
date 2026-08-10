@@ -561,48 +561,127 @@ const normalizeResources = (resources?: DbgptAppResource[]) => {
   }));
 };
 
-const readStreamResponse = async (response: Response) => {
-  const parseEventText = (text: string) => {
-    if (!text.includes('data:')) return text;
-    let output = '';
-    text.split('\n').forEach((line) => {
-      if (!line.startsWith('data:')) return;
-      const raw = line.replace(/^data:\s*/, '');
-      if (!raw || raw === '[DONE]') return;
-      try {
-        const parsed = JSON.parse(raw);
-        const content =
-          parsed.vis ||
-          parsed.choices?.[0]?.message?.content ||
-          parsed.context ||
-          raw;
-        output += `${typeof content === 'string' ? content : JSON.stringify(content)}\n`;
-      } catch {
-        output += `${raw.replaceAll('\\n', '\n')}\n`;
+const extractFenceBlocks = (value: string, fenceName: string) => {
+  const blocks: string[] = [];
+  const pattern = new RegExp(`\`\`\`${fenceName}\\s*\\n([\\s\\S]*?)\\n\`\`\``, 'g');
+  let matched: RegExpExecArray | null;
+  while ((matched = pattern.exec(value)) !== null) {
+    blocks.push(matched[1]);
+  }
+  return blocks;
+};
+
+const stripRuntimeMarkdown = (value: string) => {
+  return value
+    .replace(/`{3,}vis-thinking[\s\S]*?`{3,}/g, '')
+    .replace(/```agent-plans\s*\n[\s\S]*?\n```/g, '')
+    .replace(/```agent-messages\s*\n[\s\S]*?\n```/g, '')
+    .trim();
+};
+
+const extractAgentMessages = (vis: string) => {
+  const messages: string[] = [];
+  extractFenceBlocks(vis, 'agent-messages').forEach((block) => {
+    try {
+      const parsed = JSON.parse(block) as Array<{
+        sender?: string;
+        markdown?: string;
+      }>;
+      parsed.forEach((item) => {
+        const sender = String(item.sender || '').toLowerCase();
+        const markdown = stripRuntimeMarkdown(String(item.markdown || ''));
+        if (sender !== 'human' && markdown) {
+          messages.push(markdown);
+        }
+      });
+    } catch {
+      // Ignore nested agent-message strings embedded inside the agent-plan JSON.
+    }
+  });
+  return messages;
+};
+
+const summarizeDbgptStreamEvents = (events: string[]) => {
+  let finalAgentMessage = '';
+  const fallbackParts: string[] = [];
+
+  events.forEach((raw) => {
+    if (!raw || raw === '[DONE]') return;
+    try {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed.vis === 'string') {
+        const messages = extractAgentMessages(parsed.vis);
+        if (messages.length) {
+          finalAgentMessage = messages[messages.length - 1];
+          return;
+        }
+        const fallback = stripRuntimeMarkdown(parsed.vis);
+        if (fallback && fallback !== '[DONE]') fallbackParts.push(fallback);
+        return;
       }
-    });
-    return output.trim() || text;
-  };
+
+      const content =
+        parsed.choices?.[0]?.delta?.content ||
+        parsed.choices?.[0]?.message?.content ||
+        parsed.context ||
+        parsed.response;
+      if (typeof content === 'string' && content.trim()) {
+        fallbackParts.push(content.trim());
+      }
+    } catch {
+      const fallback = raw.replace(/\\n/g, '\n').trim();
+      if (fallback) fallbackParts.push(fallback);
+    }
+  });
+
+  const result = finalAgentMessage || fallbackParts.join('\n').trim();
+  if (/401 Client Error: Unauthorized/i.test(result)) {
+    return [
+      'DB-GPT model authorization failed.',
+      '',
+      result,
+      '',
+      'Check the DB-GPT LLM and embedding API endpoint/key configuration.',
+    ].join('\n');
+  }
+  return result || 'No response content.';
+};
+
+const extractSseEvents = (text: string) => {
+  return text
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.replace(/^data:\s*/, ''))
+    .filter(Boolean);
+};
+
+const readStreamResponse = async (response: Response) => {
   const contentType = response.headers.get('content-type') || '';
   if (contentType.includes('text/event-stream') && response.body) {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    let output = '';
+    const events: string[] = [];
+    let pending = '';
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
-      const chunk = decoder.decode(value, { stream: true });
-      chunk.split('\n').forEach((line) => {
+      pending += decoder.decode(value, { stream: true });
+      const lines = pending.split(/\r?\n/);
+      pending = lines.pop() || '';
+      lines.forEach((line) => {
         if (!line.startsWith('data:')) return;
         const raw = line.replace(/^data:\s*/, '');
-        if (!raw || raw === '[DONE]') return;
-        output += `${parseEventText(`data:${raw}`)}\n`;
+        if (raw) events.push(raw);
       });
     }
-    return output.trim() || 'No response content.';
+    if (pending.startsWith('data:')) {
+      const raw = pending.replace(/^data:\s*/, '');
+      if (raw) events.push(raw);
+    }
+    return summarizeDbgptStreamEvents(events);
   }
   const text = await response.text();
-  if (text.includes('data:')) return parseEventText(text);
+  if (text.includes('data:')) return summarizeDbgptStreamEvents(extractSseEvents(text));
   try {
     return JSON.stringify(JSON.parse(text), null, 2);
   } catch {
@@ -1116,7 +1195,6 @@ function AgentConfiguration({
               <Form.Item
                 label="LLM strategy"
                 name={['agent_details', agentName, 'llm_strategy']}
-                initialValue="default"
               >
                 <Select options={strategyOptions} />
               </Form.Item>
