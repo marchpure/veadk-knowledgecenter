@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   Alert,
   Button,
+  Checkbox,
   Drawer,
   Dropdown,
   Form,
@@ -19,8 +20,6 @@ import {
   message,
 } from 'antd';
 import AppstoreOutlined from '@ant-design/icons/AppstoreOutlined';
-import BarChartOutlined from '@ant-design/icons/BarChartOutlined';
-import DatabaseOutlined from '@ant-design/icons/DatabaseOutlined';
 import DeleteOutlined from '@ant-design/icons/DeleteOutlined';
 import EditOutlined from '@ant-design/icons/EditOutlined';
 import EllipsisOutlined from '@ant-design/icons/EllipsisOutlined';
@@ -39,8 +38,6 @@ import {
   ConstructToolbar,
   StatusTag,
 } from '@/components/construct/ConstructLayout';
-import { useDiagramQuery } from '@/apollo/client/graphql/diagram.generated';
-import { useGetSettingsQuery } from '@/apollo/client/graphql/settings.generated';
 import {
   DbgptApp,
   DbgptAgent,
@@ -48,6 +45,7 @@ import {
   DbgptAppPayload,
   DbgptAppParamNeed,
   DbgptAppResource,
+  DbgptConfigurableParam,
   DbgptDialogue,
   DbgptFlow,
   DbgptNativeScene,
@@ -559,16 +557,6 @@ const ChatEmptyState = styled.div`
   color: #64748b;
   text-align: center;
 `;
-
-const getDataSourceName = (properties?: Record<string, unknown>) => {
-  if (!properties) return 'WrenAI GenBI';
-  return (
-    (properties.displayName as string) ||
-    (properties.database as string) ||
-    (properties.projectId as string) ||
-    'WrenAI GenBI'
-  );
-};
 
 const isPublished = (app: DbgptApp) => String(app.published) === 'true';
 
@@ -1296,22 +1284,225 @@ function ApplicationDetailsDrawer({
   );
 }
 
+const parseResourceValue = (value?: string) => {
+  if (!value) return {};
+  try {
+    return JSON.parse(value) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+};
+
+const isComplexOptionList = (values?: DbgptConfigurableParam['valid_values']) =>
+  Array.isArray(values) &&
+  values.length > 0 &&
+  typeof values[0] === 'object' &&
+  values[0] !== null &&
+  'key' in values[0];
+
+const isBlankParamValue = (value: unknown) =>
+  value === undefined || value === null || value === '';
+
+const buildDefaultResourceConfig = (params?: DbgptConfigurableParam[]) => {
+  const defaults: Record<string, unknown> = {};
+  (params || []).forEach((param) => {
+    if (param.nested_fields) return;
+    if (param.default_value !== undefined) {
+      defaults[param.param_name] = param.default_value;
+    }
+  });
+  return defaults;
+};
+
+const renderParamInput = (
+  param: DbgptConfigurableParam,
+  value: unknown,
+  onChange: (value: unknown) => void,
+) => {
+  const type = param.param_type.toLowerCase();
+  const fixed = String(param.ext_metadata?.tags || '').includes('fixed');
+  const privacy = String(param.ext_metadata?.tags || '').includes('privacy');
+
+  if (type === 'bool' || type === 'boolean') {
+    return (
+      <Checkbox
+        disabled={fixed}
+        checked={Boolean(value)}
+        onChange={(event) => onChange(event.target.checked)}
+      />
+    );
+  }
+
+  if (type === 'int' || type === 'integer' || type === 'number') {
+    return (
+      <InputNumber
+        className="w-100"
+        disabled={fixed}
+        value={typeof value === 'number' ? value : undefined}
+        onChange={onChange}
+      />
+    );
+  }
+
+  if (type === 'float') {
+    return (
+      <InputNumber
+        className="w-100"
+        disabled={fixed}
+        step={0.1}
+        value={typeof value === 'number' ? value : undefined}
+        onChange={onChange}
+      />
+    );
+  }
+
+  if (param.valid_values) {
+    return (
+      <Select
+        showSearch
+        disabled={fixed}
+        allowClear
+        value={typeof value === 'string' ? value : undefined}
+        onChange={onChange}
+      >
+        {isComplexOptionList(param.valid_values)
+          ? (param.valid_values as DbgptResourceOption[]).map((item) => (
+              <Select.Option key={item.key} value={item.key}>
+                {item.label || item.key}
+              </Select.Option>
+            ))
+          : (param.valid_values as string[]).map((item) => (
+              <Select.Option key={item} value={item}>
+                {item}
+              </Select.Option>
+            ))}
+      </Select>
+    );
+  }
+
+  if (privacy) {
+    return (
+      <Input.Password
+        disabled={fixed}
+        autoComplete="new-password"
+        value={typeof value === 'string' ? value : undefined}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    );
+  }
+
+  return (
+    <Input
+      disabled={fixed}
+      value={typeof value === 'string' ? value : undefined}
+      onChange={(event) => onChange(event.target.value)}
+    />
+  );
+};
+
+function ResourceParamEditor({
+  param,
+  value,
+  onChange,
+}: {
+  param: DbgptConfigurableParam;
+  value: unknown;
+  onChange: (value: unknown) => void;
+}) {
+  const requiredMissing = param.required && isBlankParamValue(value);
+
+  if (param.nested_fields) {
+    const nestedValue =
+      value && typeof value === 'object'
+        ? (value as Record<string, unknown>)
+        : {};
+    const selectedType =
+      typeof nestedValue.type === 'string' ? nestedValue.type : undefined;
+    const selectedFields = selectedType
+      ? param.nested_fields[selectedType] || []
+      : [];
+    return (
+      <AgentDetailBox style={{ background: '#f8fafc' }}>
+        <Form.Item
+          label={param.label || param.param_name}
+          tooltip={param.description}
+          required={param.required}
+          validateStatus={requiredMissing ? 'warning' : undefined}
+          help={
+            requiredMissing
+              ? `Select ${param.label || param.param_name}.`
+              : undefined
+          }
+        >
+          <Select
+            placeholder={`Select ${param.label || param.param_name}`}
+            value={selectedType}
+            onChange={(nextType) => {
+              const defaults = buildDefaultResourceConfig(
+                param.nested_fields?.[nextType],
+              );
+              onChange({ type: nextType, ...defaults });
+            }}
+          >
+            {Object.keys(param.nested_fields).map((type) => (
+              <Select.Option key={type} value={type}>
+                {type}
+              </Select.Option>
+            ))}
+          </Select>
+        </Form.Item>
+        {selectedFields.map((field) => (
+          <ResourceParamEditor
+            key={field.param_name}
+            param={field}
+            value={nestedValue[field.param_name] ?? field.default_value}
+            onChange={(nextValue) =>
+              onChange({
+                ...nestedValue,
+                type: selectedType,
+                [field.param_name]: nextValue,
+              })
+            }
+          />
+        ))}
+      </AgentDetailBox>
+    );
+  }
+
+  return (
+    <Form.Item
+      label={param.label || param.param_name}
+      tooltip={param.description}
+      required={param.required}
+      validateStatus={requiredMissing ? 'warning' : undefined}
+      help={
+        requiredMissing
+          ? `Enter ${param.label || param.param_name}.`
+          : undefined
+      }
+    >
+      {renderParamInput(param, value, onChange)}
+    </Form.Item>
+  );
+}
+
 function ResourceEditor({
   value,
   resourceTypes,
-  resourceOptions,
-  resourceLoading,
-  onLoadOptions,
+  resourceParamSchemas,
+  resourceParamLoading,
+  onLoadParamSchema,
   onChange,
 }: {
   value?: DbgptAppResource[];
   resourceTypes: string[];
-  resourceOptions: Record<string, DbgptResourceOption[]>;
-  resourceLoading: Record<string, boolean>;
-  onLoadOptions: (type: string) => void;
+  resourceParamSchemas: Record<string, DbgptConfigurableParam[]>;
+  resourceParamLoading: Record<string, boolean>;
+  onLoadParamSchema: (type: string) => void;
   onChange?: (value: DbgptAppResource[]) => void;
 }) {
   const resources = value || [];
+  const availableTypes = resourceTypes.filter((type) => type !== 'all');
   const updateAt = (index: number, patch: Partial<DbgptAppResource>) => {
     const next = resources.map((item, idx) =>
       idx === index ? { ...item, ...patch } : item,
@@ -1319,83 +1510,133 @@ function ResourceEditor({
     onChange?.(next);
   };
 
+  const updateConfig = (index: number, field: string, nextValue: unknown) => {
+    const current = parseResourceValue(resources[index]?.value);
+    const next = { ...current, [field]: nextValue };
+    updateAt(index, { value: JSON.stringify(next) });
+  };
+
+  useEffect(() => {
+    const nextResources = resources.map((resource) => {
+      if (!resource.type || resource.is_dynamic) return resource;
+      const params = resourceParamSchemas[resource.type];
+      if (!params?.length) return resource;
+      const defaults = buildDefaultResourceConfig(params);
+      if (!Object.keys(defaults).length) return resource;
+      const current = parseResourceValue(resource.value);
+      let changed = false;
+      Object.entries(defaults).forEach(([key, defaultValue]) => {
+        if (current[key] === undefined) {
+          current[key] = defaultValue;
+          changed = true;
+        }
+      });
+      return changed
+        ? { ...resource, value: JSON.stringify(current) }
+        : resource;
+    });
+    const changed = JSON.stringify(nextResources) !== JSON.stringify(resources);
+    if (changed) onChange?.(nextResources);
+  }, [onChange, resourceParamSchemas, resources]);
+
   return (
     <div>
       {resources.map((resource, index) => {
-        const options = resource.type
-          ? resourceOptions[resource.type] || []
-          : [];
+        const params = resource.type ? resourceParamSchemas[resource.type] : [];
+        const configValues = parseResourceValue(resource.value);
         return (
-          <ResourceRow key={`${resource.name || 'resource'}-${index}`}>
-            <Select
-              placeholder="Resource type"
-              value={resource.type}
-              options={resourceTypes.map((type) => ({
-                label: type,
-                value: type,
-              }))}
-              onChange={(type) => {
-                onLoadOptions(type);
-                updateAt(index, {
-                  type,
-                  value: '',
-                  name: resource.name || `Resource ${index + 1}`,
-                });
-              }}
-            />
-            <Select
-              disabled={resource.is_dynamic || !resource.type}
-              loading={resource.type ? resourceLoading[resource.type] : false}
-              placeholder={
-                resource.is_dynamic ? 'Resolved at runtime' : 'Select resource'
-              }
-              value={resource.value || undefined}
-              options={options.map((item) => ({
-                label: item.label || item.key,
-                value: item.key,
-              }))}
-              onDropdownVisibleChange={(open) => {
-                if (open && resource.type) onLoadOptions(resource.type);
-              }}
-              onChange={(nextValue) => updateAt(index, { value: nextValue })}
-              allowClear
-            />
-            <Input
-              placeholder="Display name"
-              value={resource.name}
-              onChange={(event) =>
-                updateAt(index, { name: event.target.value })
-              }
-            />
-            <Switch
-              checkedChildren="Dynamic"
-              unCheckedChildren="Static"
-              checked={Boolean(resource.is_dynamic)}
-              onChange={(checked) =>
-                updateAt(index, {
-                  is_dynamic: checked,
-                  value: checked ? '' : resource.value,
-                })
-              }
-            />
-          </ResourceRow>
+          <AgentDetailBox
+            key={`${resource.name || 'resource'}-${index}`}
+            style={{ background: '#fff' }}
+          >
+            <ResourceRow>
+              <Input
+                placeholder="Resource name"
+                value={resource.name}
+                onChange={(event) =>
+                  updateAt(index, { name: event.target.value })
+                }
+              />
+              <Select
+                placeholder="Resource type"
+                value={resource.type}
+                options={availableTypes.map((type) => ({
+                  label: type,
+                  value: type,
+                }))}
+                onChange={(type) => {
+                  onLoadParamSchema(type);
+                  updateAt(index, {
+                    type,
+                    value: '',
+                    name: resource.name || `Resource ${index + 1}`,
+                  });
+                }}
+              />
+              <Switch
+                checkedChildren="Dynamic"
+                unCheckedChildren="Static"
+                checked={Boolean(resource.is_dynamic)}
+                onChange={(checked) =>
+                  updateAt(index, {
+                    is_dynamic: checked,
+                    value: checked ? '' : resource.value,
+                  })
+                }
+              />
+              <Button
+                danger
+                onClick={() =>
+                  onChange?.(resources.filter((_, idx) => idx !== index))
+                }
+              >
+                Remove
+              </Button>
+            </ResourceRow>
+            {resource.type && !resource.is_dynamic && (
+              <Spin spinning={Boolean(resourceParamLoading[resource.type])}>
+                {params?.length ? (
+                  params.map((param) => (
+                    <ResourceParamEditor
+                      key={param.param_name}
+                      param={param}
+                      value={
+                        configValues[param.param_name] ?? param.default_value
+                      }
+                      onChange={(nextValue) =>
+                        updateConfig(index, param.param_name, nextValue)
+                      }
+                    />
+                  ))
+                ) : (
+                  <Alert
+                    type="info"
+                    showIcon
+                    message="No configurable parameters returned for this resource type."
+                  />
+                )}
+              </Spin>
+            )}
+          </AgentDetailBox>
         );
       })}
       <Button
         block
         type="dashed"
         icon={<PlusOutlined />}
-        onClick={() =>
+        onClick={() => {
+          const type = availableTypes[0];
+          if (type) onLoadParamSchema(type);
           onChange?.([
             ...resources,
             {
               name: `Resource ${resources.length + 1}`,
-              type: resourceTypes[0],
+              type,
               value: '',
               is_dynamic: false,
             },
-          ])
-        }
+          ]);
+        }}
       >
         Add resource
       </Button>
@@ -1406,15 +1647,15 @@ function ResourceEditor({
 function AgentConfiguration({
   app,
   catalog,
-  resourceOptions,
-  resourceLoading,
-  onLoadOptions,
+  resourceParamSchemas,
+  resourceParamLoading,
+  onLoadParamSchema,
 }: {
   app: DbgptApp;
   catalog: CatalogState;
-  resourceOptions: Record<string, DbgptResourceOption[]>;
-  resourceLoading: Record<string, boolean>;
-  onLoadOptions: (type: string) => void;
+  resourceParamSchemas: Record<string, DbgptConfigurableParam[]>;
+  resourceParamLoading: Record<string, boolean>;
+  onLoadParamSchema: (type: string) => void;
 }) {
   const form = Form.useFormInstance<ConfigureFormValues>();
   const selectedAgents = Form.useWatch('agent_names') || [];
@@ -1542,9 +1783,9 @@ function AgentConfiguration({
               >
                 <ResourceEditor
                   resourceTypes={catalog.resourceTypes}
-                  resourceOptions={resourceOptions}
-                  resourceLoading={resourceLoading}
-                  onLoadOptions={onLoadOptions}
+                  resourceParamSchemas={resourceParamSchemas}
+                  resourceParamLoading={resourceParamLoading}
+                  onLoadParamSchema={onLoadParamSchema}
                 />
               </Form.Item>
             </AgentDetailBox>
@@ -2261,6 +2502,82 @@ function buildConfigurePayload(
   return base;
 }
 
+const collectMissingResourceParams = (
+  params: DbgptConfigurableParam[],
+  values: Record<string, unknown>,
+  prefix: string,
+) => {
+  const missing: string[] = [];
+  params.forEach((param) => {
+    const label = param.label || param.param_name;
+    const value = values[param.param_name];
+    if (param.nested_fields) {
+      const nestedValue =
+        value && typeof value === 'object'
+          ? (value as Record<string, unknown>)
+          : {};
+      if (param.required && isBlankParamValue(nestedValue.type)) {
+        missing.push(`${prefix}: ${label}`);
+        return;
+      }
+      if (typeof nestedValue.type === 'string') {
+        missing.push(
+          ...collectMissingResourceParams(
+            param.nested_fields[nestedValue.type] || [],
+            nestedValue,
+            `${prefix}: ${label}`,
+          ),
+        );
+      }
+      return;
+    }
+    if (param.required && isBlankParamValue(value)) {
+      missing.push(`${prefix}: ${label}`);
+    }
+  });
+  return missing;
+};
+
+const validateConfiguredResources = (
+  app: DbgptApp,
+  values: ConfigureFormValues,
+  resourceSchemas: Record<string, DbgptConfigurableParam[]>,
+) => {
+  if (!['single_agent', 'auto_plan'].includes(app.team_mode || '')) return;
+  const missingSchemas = new Set<string>();
+  const missingParams: string[] = [];
+  (values.agent_names || []).forEach((agentName) => {
+    const resources = values.agent_details?.[agentName]?.resources || [];
+    resources.forEach((resource) => {
+      if (!resource.type || resource.is_dynamic) return;
+      const schema = resourceSchemas[resource.type];
+      if (!schema) {
+        missingSchemas.add(resource.type);
+        return;
+      }
+      const resourceName = resource.name || resource.type;
+      missingParams.push(
+        ...collectMissingResourceParams(
+          schema,
+          parseResourceValue(resource.value),
+          `${agentName} / ${resourceName}`,
+        ),
+      );
+    });
+  });
+
+  if (missingSchemas.size) {
+    throw new Error(
+      `Resource parameters are still loading: ${Array.from(missingSchemas).join(
+        ', ',
+      )}.`,
+    );
+  }
+  if (missingParams.length) {
+    throw new Error(`Complete required resource fields: ${missingParams[0]}.`);
+  }
+};
+
 export default function Applications() {
   const [configureForm] = Form.useForm<ConfigureFormValues>();
   const [apps, setApps] = useState<DbgptApp[]>([]);
@@ -2270,6 +2587,12 @@ export default function Applications() {
     Record<string, DbgptResourceOption[]>
   >({});
   const [resourceLoading, setResourceLoading] = useState<
+    Record<string, boolean>
+  >({});
+  const [resourceParamSchemas, setResourceParamSchemas] = useState<
+    Record<string, DbgptConfigurableParam[]>
+  >({});
+  const [resourceParamLoading, setResourceParamLoading] = useState<
     Record<string, boolean>
   >({});
   const [page, setPage] = useState(1);
@@ -2293,16 +2616,6 @@ export default function Applications() {
   const [selectedApp, setSelectedApp] = useState<DbgptApp | null>(null);
   const [configuringApp, setConfiguringApp] = useState<DbgptApp | null>(null);
   const [chatSession, setChatSession] = useState<ChatSessionState | null>(null);
-  const settingsQuery = useGetSettingsQuery({
-    fetchPolicy: 'cache-and-network',
-  });
-  const diagramQuery = useDiagramQuery({ fetchPolicy: 'cache-and-network' });
-
-  const dataSource = settingsQuery.data?.settings?.dataSource;
-  const hasDataProduct = Boolean(dataSource?.type);
-  const productName = getDataSourceName(dataSource?.properties);
-  const modelCount = diagramQuery.data?.diagram?.models?.length || 0;
-
   const loadTeamModes = useCallback(async () => {
     setTeamModesLoading(true);
     setTeamModeError(null);
@@ -2400,6 +2713,35 @@ export default function Applications() {
     [resourceLoading, resourceOptions],
   );
 
+  const loadResourceParamSchema = useCallback(
+    async (type: string) => {
+      if (!type || resourceParamSchemas[type] || resourceParamLoading[type])
+        return;
+      setResourceParamLoading((current) => ({ ...current, [type]: true }));
+      try {
+        const data = await fetchDbgpt<DbgptConfigurableParam[]>(
+          `/api/v1/app/resources/list?type=${encodeURIComponent(
+            type,
+          )}&version=v2`,
+        );
+        setResourceParamSchemas((current) => ({
+          ...current,
+          [type]: data || [],
+        }));
+      } catch (err) {
+        message.warning(
+          err instanceof Error
+            ? `Unable to load ${type} resource parameters: ${err.message}`
+            : `Unable to load ${type} resource parameters.`,
+        );
+        setResourceParamSchemas((current) => ({ ...current, [type]: [] }));
+      } finally {
+        setResourceParamLoading((current) => ({ ...current, [type]: false }));
+      }
+    },
+    [resourceParamLoading, resourceParamSchemas],
+  );
+
   const loadApps = async (nextPage = page) => {
     setLoading(true);
     setError(null);
@@ -2447,18 +2789,6 @@ export default function Applications() {
   useEffect(() => {
     loadCatalog();
   }, [loadCatalog]);
-
-  const runtimeCards = useMemo(() => {
-    if (!hasDataProduct) return [];
-    return [
-      {
-        key: 'wren-genbi',
-        title: `${productName} Ask`,
-        description:
-          'WrenAI GenBI runtime for the current database product. It uses the configured semantic model and knowledge.',
-      },
-    ];
-  }, [hasDataProduct, productName]);
 
   const openCreateModal = () => {
     setModalMode('create');
@@ -2520,7 +2850,7 @@ export default function Applications() {
       configureForm.setFieldsValue(initialValues);
       (fullApp.details || []).forEach((detail) => {
         (detail.resources || []).forEach((resource) => {
-          if (resource.type) loadResourceOptions(resource.type);
+          if (resource.type) loadResourceParamSchema(resource.type);
         });
       });
       const nativeResourceType = fullApp.param_need?.find(
@@ -2688,6 +3018,27 @@ export default function Applications() {
       openConfigure(app);
       return;
     }
+    if (
+      !isPublished(app) &&
+      configuringApp?.app_code === app.app_code &&
+      ['single_agent', 'auto_plan'].includes(configuringApp.team_mode || '')
+    ) {
+      try {
+        const values = await configureForm.validateFields();
+        validateConfiguredResources(
+          configuringApp,
+          values,
+          resourceParamSchemas,
+        );
+      } catch (err) {
+        message.error(
+          err instanceof Error
+            ? err.message
+            : 'Complete application configuration before publishing.',
+        );
+        return;
+      }
+    }
     const published = isPublished(app);
     const operation = published ? 'unpublish' : 'publish';
     setActionLoading(`${operation}:${app.app_code}`);
@@ -2727,6 +3078,7 @@ export default function Applications() {
     setSavingConfig(true);
     try {
       const values = await configureForm.validateFields();
+      validateConfiguredResources(configuringApp, values, resourceParamSchemas);
       const payload = buildConfigurePayload(configuringApp, values, catalog);
       const saved = await fetchDbgpt<DbgptApp>('/api/v1/app/edit', {
         method: 'POST',
@@ -2961,9 +3313,9 @@ export default function Applications() {
                   <AgentConfiguration
                     app={configuringApp}
                     catalog={catalog}
-                    resourceOptions={resourceOptions}
-                    resourceLoading={resourceLoading}
-                    onLoadOptions={loadResourceOptions}
+                    resourceParamSchemas={resourceParamSchemas}
+                    resourceParamLoading={resourceParamLoading}
+                    onLoadParamSchema={loadResourceParamSchema}
                   />
                 )}
                 {configuringApp.team_mode === 'awel_layout' && (
@@ -2994,7 +3346,7 @@ export default function Applications() {
       activeKey="applications"
       icon={<AppstoreOutlined />}
       title="Applications"
-      description="Manage published runtimes, workflow agents, and the WrenAI GenBI entry inside this workspace."
+      description="Create, configure, publish, and chat with DB-GPT applications inside this workspace."
       loading={loading && apps.length === 0}
       actions={
         <Button
@@ -3030,7 +3382,7 @@ export default function Applications() {
             />
           </>
         }
-        right={<Tag>{total + runtimeCards.length} entries</Tag>}
+        right={<Tag>{total} entries</Tag>}
       />
 
       <Spin spinning={loading}>
@@ -3040,51 +3392,23 @@ export default function Applications() {
             description={error}
             action={<Button onClick={() => loadApps(1)}>Retry</Button>}
           />
-        ) : runtimeCards.length === 0 && apps.length === 0 ? (
+        ) : apps.length === 0 ? (
           <ConstructEmpty
             title="No applications"
-            description="Create an application or configure a WrenAI data product to expose a runtime entry."
+            description="Create a DB-GPT application, configure its work mode, then publish it before users can chat."
             action={
-              <Link href={Path.Database}>
-                <Button icon={<DatabaseOutlined />}>Open database</Button>
-              </Link>
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={openCreateModal}
+              >
+                Create app
+              </Button>
             }
           />
         ) : (
           <>
             <AppGrid>
-              {runtimeCards.map((card) => (
-                <AppCard key={card.key} $runtime>
-                  <AppHeader>
-                    <AppIcon $color="linear-gradient(135deg, #0ea5e9, #2563eb)">
-                      <BarChartOutlined />
-                    </AppIcon>
-                    <div style={{ minWidth: 0 }}>
-                      <AppTitle>{card.title}</AppTitle>
-                      <AppMeta>
-                        <Tag color="blue">Database</Tag>
-                        <Tag>GenBI</Tag>
-                        <Tag>{modelCount} models</Tag>
-                      </AppMeta>
-                    </div>
-                  </AppHeader>
-                  <Paragraph
-                    className="gray-7 mt-4 mb-0"
-                    ellipsis={{ rows: 3 }}
-                  >
-                    {card.description}
-                  </Paragraph>
-                  <AppFooter>
-                    <Text className="gray-7 text-sm">WrenAI runtime</Text>
-                    <Link href={Path.Home}>
-                      <Button type="primary" size="small">
-                        Ask
-                      </Button>
-                    </Link>
-                  </AppFooter>
-                </AppCard>
-              ))}
-
               {apps.map((app) => {
                 const published = isPublished(app);
                 const publishKey = `${published ? 'unpublish' : 'publish'}:${app.app_code}`;

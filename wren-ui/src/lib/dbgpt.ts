@@ -268,6 +268,21 @@ export type DbgptAppResource = {
   is_dynamic?: boolean;
 };
 
+export type DbgptConfigurableParam = {
+  param_class?: string;
+  param_name: string;
+  param_type: string;
+  default_value?: string | boolean | number | null;
+  description?: string;
+  required?: boolean;
+  valid_values?: null | Array<string | DbgptResourceOption>;
+  ext_metadata?: Record<string, string | number | boolean>;
+  is_array?: boolean;
+  label?: string;
+  nested_fields?: Record<string, DbgptConfigurableParam[]> | null;
+  param_order?: number;
+};
+
 export type DbgptAppParamNeed = {
   type: string;
   value: unknown;
@@ -382,7 +397,9 @@ export async function fetchDbgpt<T>(
   return unwrapDbgpt<T>(payload);
 }
 
-export function mapFlowDataToReactFlow(flowData?: DbgptFlowData): DbgptFlowData {
+export function mapFlowDataToReactFlow(
+  flowData?: DbgptFlowData,
+): DbgptFlowData {
   if (!flowData) {
     return { nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } };
   }
