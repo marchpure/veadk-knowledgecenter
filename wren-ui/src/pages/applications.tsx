@@ -30,6 +30,7 @@ import PlusOutlined from '@ant-design/icons/PlusOutlined';
 import RocketOutlined from '@ant-design/icons/RocketOutlined';
 import SearchOutlined from '@ant-design/icons/SearchOutlined';
 import SendOutlined from '@ant-design/icons/SendOutlined';
+import ShareAltOutlined from '@ant-design/icons/ShareAltOutlined';
 import StopOutlined from '@ant-design/icons/StopOutlined';
 import styled from 'styled-components';
 import {
@@ -43,7 +44,6 @@ import { useGetSettingsQuery } from '@/apollo/client/graphql/settings.generated'
 import {
   DbgptApp,
   DbgptAgent,
-  DbgptAppDetail,
   DbgptAppListResponse,
   DbgptAppPayload,
   DbgptAppParamNeed,
@@ -91,6 +91,18 @@ type ConfigureFormValues = {
   max_new_tokens?: number;
   prompt_template?: string;
   recommend_questions?: Array<{ question?: string; valid?: boolean }>;
+};
+
+type RuntimeMessage = {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+};
+
+type ChatSessionState = {
+  app: DbgptApp;
+  convUid: string;
+  chatMode: string;
 };
 
 type CatalogState = {
@@ -304,21 +316,6 @@ const DetailValue = styled.div`
   word-break: break-word;
 `;
 
-const JsonBlock = styled.pre`
-  max-height: 260px;
-  margin: 10px 0 0;
-  padding: 12px;
-  overflow: auto;
-  border: 1px solid rgba(226, 232, 240, 0.92);
-  border-radius: 8px;
-  background: #f8fafc;
-  color: #334155;
-  font-size: 12px;
-  line-height: 1.55;
-  white-space: pre-wrap;
-  word-break: break-word;
-`;
-
 const ConfigureShell = styled.div`
   min-height: calc(100vh - 56px);
 `;
@@ -377,7 +374,9 @@ const AgentOption = styled.div<{ $selected?: boolean }>`
   padding: 12px;
   border: 1px solid
     ${(props) =>
-      props.$selected ? 'rgba(40, 103, 245, 0.70)' : 'rgba(226, 232, 240, 0.96)'};
+      props.$selected
+        ? 'rgba(40, 103, 245, 0.70)'
+        : 'rgba(226, 232, 240, 0.96)'};
   border-radius: 8px;
   background: ${(props) =>
     props.$selected ? 'rgba(40, 103, 245, 0.06)' : '#fff'};
@@ -401,7 +400,9 @@ const AgentCheck = styled.span<{ $selected?: boolean }>`
   margin-right: 8px;
   border: 1px solid
     ${(props) =>
-      props.$selected ? 'rgba(40, 103, 245, 0.92)' : 'rgba(148, 163, 184, 0.9)'};
+      props.$selected
+        ? 'rgba(40, 103, 245, 0.92)'
+        : 'rgba(148, 163, 184, 0.9)'};
   border-radius: ${(props) => (props.$selected ? '50%' : '4px')};
   background: ${(props) => (props.$selected ? '#2867f5' : '#fff')};
 
@@ -441,20 +442,122 @@ const RunPanel = styled.div`
   gap: 12px;
 `;
 
-const RunOutput = styled.pre`
-  min-height: 220px;
-  max-height: 420px;
-  margin: 0;
-  padding: 12px;
-  overflow: auto;
+const ChatSession = styled.div`
+  display: flex;
+  flex-direction: column;
+  min-height: 420px;
   border: 1px solid rgba(226, 232, 240, 0.94);
   border-radius: 8px;
-  background: #0f172a;
-  color: #e5e7eb;
-  font-size: 12px;
-  line-height: 1.55;
+  background: #fff;
+`;
+
+const ChatSessionMessages = styled.div`
+  flex: 1;
+  max-height: 520px;
+  min-height: 260px;
+  padding: 14px;
+  overflow: auto;
+  background: #f8fafc;
+`;
+
+const ChatSessionMessage = styled.div<{ $role: RuntimeMessage['role'] }>`
+  display: flex;
+  justify-content: ${(props) =>
+    props.$role === 'user' ? 'flex-end' : 'flex-start'};
+  margin-bottom: 10px;
+`;
+
+const ChatSessionBubble = styled.div<{ $role: RuntimeMessage['role'] }>`
+  max-width: 88%;
+  padding: 10px 12px;
+  border: 1px solid
+    ${(props) =>
+      props.$role === 'user'
+        ? 'rgba(40, 103, 245, 0.26)'
+        : 'rgba(226, 232, 240, 0.96)'};
+  border-radius: 8px;
+  background: ${(props) =>
+    props.$role === 'user' ? 'rgba(40, 103, 245, 0.08)' : '#fff'};
+  color: #111827;
+  font-size: 13px;
+  line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
+`;
+
+const ChatSessionComposer = styled.div`
+  padding: 12px;
+  border-top: 1px solid rgba(226, 232, 240, 0.94);
+  background: #fff;
+`;
+
+const ConfigSummary = styled.div`
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+`;
+
+const ConfigSummaryItem = styled.div`
+  padding: 10px 12px;
+  border: 1px solid rgba(226, 232, 240, 0.94);
+  border-radius: 8px;
+  background: #fff;
+`;
+
+const ChatWorkspace = styled.div`
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 18px;
+
+  @media (max-width: 1120px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const ChatMain = styled.div`
+  min-height: calc(100vh - 190px);
+  border: 1px solid rgba(226, 232, 240, 0.94);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 26px rgba(15, 23, 42, 0.05);
+  overflow: hidden;
+`;
+
+const ChatHeader = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px 18px;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.94);
+`;
+
+const ChatBody = styled.div`
+  height: calc(100vh - 352px);
+  min-height: 360px;
+  padding: 18px;
+  overflow: auto;
+  background: #f8fafc;
+`;
+
+const ChatComposer = styled.div`
+  padding: 14px 18px 18px;
+  border-top: 1px solid rgba(226, 232, 240, 0.94);
+  background: #fff;
+`;
+
+const ChatSide = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+`;
+
+const ChatEmptyState = styled.div`
+  display: grid;
+  place-items: center;
+  min-height: 260px;
+  color: #64748b;
+  text-align: center;
 `;
 
 const getDataSourceName = (properties?: Record<string, unknown>) => {
@@ -496,25 +599,173 @@ const getModeDescription = (
 ) => {
   if (!mode) return '';
   const matched = teamModes.find((item) => item.value === mode);
-  return matched?.description_en || matched?.description || matched?.remark || '';
+  return (
+    matched?.description_en || matched?.description || matched?.remark || ''
+  );
 };
 
-const formatJson = (value: unknown) => {
-  if (
-    value === undefined ||
-    value === null ||
-    (Array.isArray(value) && value.length === 0)
-  ) {
-    return 'Not configured';
+const getAppChatMode = (app: DbgptApp) =>
+  app.team_mode === 'native_app' ? getChatScene(app) : 'chat_agent';
+
+const getAppSelectParam = (app: DbgptApp) => {
+  if (app.team_mode !== 'native_app') return app.app_code;
+  const resource = app.param_need?.find((item) => item.type === 'resource');
+  if (typeof resource?.bind_value === 'string' && resource.bind_value) {
+    return resource.bind_value;
   }
-  if (
-    typeof value === 'object' &&
-    !Array.isArray(value) &&
-    Object.keys(value as Record<string, unknown>).length === 0
-  ) {
-    return 'Not configured';
+  return '';
+};
+
+const getAppModel = (app: DbgptApp) => {
+  const model = app.param_need?.find((item) => item.type === 'model')?.value;
+  return typeof model === 'string' && model ? model : undefined;
+};
+
+const createAppDialogue = async (app: DbgptApp) => {
+  const chatMode = getAppChatMode(app);
+  const dialogue = await fetchDbgpt<DbgptDialogue>(
+    `/api/v1/chat/dialogue/new?chat_mode=${encodeURIComponent(chatMode)}`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ chat_mode: chatMode }),
+    },
+  );
+  return {
+    convUid: dialogue.conv_uid,
+    chatMode: dialogue.chat_mode || chatMode,
+  };
+};
+
+const buildChatBody = (app: DbgptApp, convUid: string, input: string) => ({
+  conv_uid: convUid,
+  app_code: app.app_code,
+  chat_mode: getAppChatMode(app),
+  user_input: input,
+  model_name: getAppModel(app),
+  select_param: getAppSelectParam(app),
+  temperature:
+    app.param_need?.find((item) => item.type === 'temperature')?.value ||
+    undefined,
+  max_new_tokens:
+    app.param_need?.find((item) => item.type === 'max_new_tokens')?.value ||
+    undefined,
+});
+
+const sendAppChat = async (app: DbgptApp, convUid: string, input: string) => {
+  const response = await fetch('/api/dbgpt/api/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(buildChatBody(app, convUid, input)),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(errorText || `Chat failed with HTTP ${response.status}`);
   }
-  return JSON.stringify(value, null, 2);
+  return readStreamResponse(response);
+};
+
+const getBrowserOrigin = () =>
+  typeof window === 'undefined' ? '' : window.location.origin;
+
+const getApplicationShareUrl = (app: DbgptApp) => {
+  const origin = getBrowserOrigin();
+  return `${origin}${Path.Applications}?mode=chat&app_code=${encodeURIComponent(
+    app.app_code,
+  )}`;
+};
+
+const getDingTalkShareUrl = (app: DbgptApp) => {
+  const origin = getBrowserOrigin();
+  const mobileUrl = `${origin}/mobile/chat/?chat_scene=${encodeURIComponent(
+    getAppChatMode(app),
+  )}&app_code=${encodeURIComponent(app.app_code)}`;
+  return `dingtalk://dingtalkclient/page/link?url=${encodeURIComponent(
+    mobileUrl,
+  )}&pc_slide=true`;
+};
+
+const copyToClipboard = async (value: string) => {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return true;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand('copy');
+  document.body.removeChild(textarea);
+  return copied;
+};
+
+const clearApplicationUrlState = () => {
+  if (typeof window === 'undefined') return;
+  const url = new URL(window.location.href);
+  url.searchParams.delete('mode');
+  url.searchParams.delete('app_code');
+  window.history.replaceState(null, '', url.toString());
+};
+
+const getAppConfigurationSummary = (
+  app: DbgptApp,
+  teamModes: DbgptTeamMode[],
+) => {
+  if (['single_agent', 'auto_plan'].includes(app.team_mode || '')) {
+    const agents = (app.details || [])
+      .map((detail) => detail.agent_name)
+      .filter(Boolean);
+    return [
+      {
+        label: app.team_mode === 'single_agent' ? 'Agent' : 'Agents',
+        value: agents.length ? agents.join(', ') : 'No agent selected',
+      },
+      {
+        label: 'Resources',
+        value:
+          (app.details || [])
+            .flatMap((detail) => detail.resources || [])
+            .map((resource) => resource.name || resource.type)
+            .filter(Boolean)
+            .join(', ') || 'No resources bound',
+      },
+    ];
+  }
+
+  if (app.team_mode === 'awel_layout') {
+    return [
+      {
+        label: 'Workflow',
+        value:
+          (app.team_context?.label as string) ||
+          (app.team_context?.name as string) ||
+          'No workflow selected',
+      },
+    ];
+  }
+
+  if (app.team_mode === 'native_app') {
+    const resource = app.param_need?.find((item) => item.type === 'resource');
+    return [
+      { label: 'Native scene', value: getChatScene(app) },
+      {
+        label: 'Resource',
+        value:
+          resource?.value === 'excel_file'
+            ? 'Selected at chat time'
+            : resource?.bind_value || 'No resource bound',
+      },
+      { label: 'Model', value: getAppModel(app) || 'Default model' },
+    ];
+  }
+
+  return [
+    {
+      label: 'Mode',
+      value: getModeLabel(app.team_mode, teamModes),
+    },
+  ];
 };
 
 const getRecommendQuestions = (app: DbgptApp) => {
@@ -553,17 +804,22 @@ const getAppActionHint = (app: DbgptApp) => {
 };
 
 const normalizeResources = (resources?: DbgptAppResource[]) => {
-  return (resources || []).filter((resource) => resource.type).map((resource, index) => ({
-    name: resource.name || `Resource ${index + 1}`,
-    type: resource.type,
-    value: resource.is_dynamic ? '' : resource.value || '',
-    is_dynamic: Boolean(resource.is_dynamic),
-  }));
+  return (resources || [])
+    .filter((resource) => resource.type)
+    .map((resource, index) => ({
+      name: resource.name || `Resource ${index + 1}`,
+      type: resource.type,
+      value: resource.is_dynamic ? '' : resource.value || '',
+      is_dynamic: Boolean(resource.is_dynamic),
+    }));
 };
 
 const extractFenceBlocks = (value: string, fenceName: string) => {
   const blocks: string[] = [];
-  const pattern = new RegExp(`\`\`\`${fenceName}\\s*\\n([\\s\\S]*?)\\n\`\`\``, 'g');
+  const pattern = new RegExp(
+    `\`\`\`${fenceName}\\s*\\n([\\s\\S]*?)\\n\`\`\``,
+    'g',
+  );
   let matched: RegExpExecArray | null;
   while ((matched = pattern.exec(value)) !== null) {
     blocks.push(matched[1]);
@@ -681,7 +937,8 @@ const readStreamResponse = async (response: Response) => {
     return summarizeDbgptStreamEvents(events);
   }
   const text = await response.text();
-  if (text.includes('data:')) return summarizeDbgptStreamEvents(extractSseEvents(text));
+  if (text.includes('data:'))
+    return summarizeDbgptStreamEvents(extractSseEvents(text));
   try {
     return JSON.stringify(JSON.parse(text), null, 2);
   } catch {
@@ -796,7 +1053,11 @@ function ApplicationModal({
             showIcon
             message="Unable to load work modes"
             description={teamModeError}
-            action={<Button size="small" onClick={onRetryTeamModes}>Retry</Button>}
+            action={
+              <Button size="small" onClick={onRetryTeamModes}>
+                Retry
+              </Button>
+            }
           />
         )}
         <Form form={form} layout="vertical" requiredMark={false}>
@@ -805,10 +1066,7 @@ function ApplicationModal({
             name="team_mode"
             rules={[{ required: true, message: 'Select a work mode.' }]}
           >
-            <TeamModeSelect
-              disabled={mode === 'edit'}
-              options={teamModes}
-            />
+            <TeamModeSelect disabled={mode === 'edit'} options={teamModes} />
           </Form.Item>
           {modeDescription && (
             <Alert
@@ -856,6 +1114,8 @@ function ApplicationDetailsDrawer({
   teamModes,
   actionLoading,
   onClose,
+  onChat,
+  onCopyShareLink,
   onEdit,
   onConfigure,
   onOperate,
@@ -867,6 +1127,8 @@ function ApplicationDetailsDrawer({
   teamModes: DbgptTeamMode[];
   actionLoading: string | null;
   onClose: () => void;
+  onChat: (app: DbgptApp) => void;
+  onCopyShareLink: (app: DbgptApp) => void;
   onEdit: (app: DbgptApp) => void;
   onConfigure: (app: DbgptApp) => void;
   onOperate: (app: DbgptApp) => void;
@@ -876,19 +1138,33 @@ function ApplicationDetailsDrawer({
   const publishKey = app
     ? `${published ? 'unpublish' : 'publish'}:${app.app_code}`
     : '';
+  const runnable = app ? getAppCompleteness(app) && published : false;
 
   return (
     <Drawer
       destroyOnClose
-      width={560}
+      width={620}
       visible={open}
-      title={app?.app_name || 'Application details'}
+      title={app?.app_name || 'Application'}
       onClose={onClose}
       footer={
         app ? (
           <FooterActions>
             <Button
               type="primary"
+              icon={<SendOutlined />}
+              disabled={!runnable}
+              onClick={() => onChat(app)}
+            >
+              Chat
+            </Button>
+            <Button
+              icon={<ShareAltOutlined />}
+              onClick={() => onCopyShareLink(app)}
+            >
+              Share
+            </Button>
+            <Button
               icon={<AppstoreOutlined />}
               onClick={() => onConfigure(app)}
             >
@@ -904,7 +1180,11 @@ function ApplicationDetailsDrawer({
             >
               {published ? 'Unpublish' : 'Publish'}
             </Button>
-            <Button danger icon={<DeleteOutlined />} onClick={() => onDelete(app)}>
+            <Button
+              danger
+              icon={<DeleteOutlined />}
+              onClick={() => onDelete(app)}
+            >
               Delete
             </Button>
           </FooterActions>
@@ -917,20 +1197,40 @@ function ApplicationDetailsDrawer({
             <DrawerSection>
               <div className="d-flex justify-space-between align-center mb-3">
                 <Title level={5} className="mb-0">
-                  Runtime
+                  Use this application
                 </Title>
                 <StatusTag status={published ? 'published' : 'unpublished'} />
               </div>
               <Paragraph className="gray-7 mb-0">
                 {app.app_describe || 'No description.'}
               </Paragraph>
+              {!published && (
+                <Alert
+                  className="mt-3"
+                  type="warning"
+                  showIcon
+                  message="Publish before users can call this application."
+                />
+              )}
+              {published && !getAppCompleteness(app) && (
+                <Alert
+                  className="mt-3"
+                  type="warning"
+                  showIcon
+                  message="Complete application configuration before chat."
+                />
+              )}
             </DrawerSection>
 
             <DrawerSection>
               <DetailGrid>
                 <DetailItem>
-                  <DetailLabel>Application code</DetailLabel>
-                  <DetailValue>{app.app_code}</DetailValue>
+                  <DetailLabel>Invocation</DetailLabel>
+                  <DetailValue>
+                    {app.team_mode === 'native_app'
+                      ? 'Native app chat'
+                      : 'Agent chat application'}
+                  </DetailValue>
                 </DetailItem>
                 <DetailItem>
                   <DetailLabel>Work mode</DetailLabel>
@@ -940,11 +1240,11 @@ function ApplicationDetailsDrawer({
                 </DetailItem>
                 <DetailItem>
                   <DetailLabel>Chat scene</DetailLabel>
-                  <DetailValue>{getChatScene(app)}</DetailValue>
+                  <DetailValue>{getAppChatMode(app)}</DetailValue>
                 </DetailItem>
                 <DetailItem>
-                  <DetailLabel>Language</DetailLabel>
-                  <DetailValue>{app.language || 'unset'}</DetailValue>
+                  <DetailLabel>Application code</DetailLabel>
+                  <DetailValue>{app.app_code}</DetailValue>
                 </DetailItem>
                 <DetailItem>
                   <DetailLabel>Owner</DetailLabel>
@@ -959,30 +1259,35 @@ function ApplicationDetailsDrawer({
 
             <DrawerSection>
               <Title level={5} className="mb-0">
-                Team context
+                Configuration summary
               </Title>
-              <JsonBlock>{formatJson(app.team_context)}</JsonBlock>
-            </DrawerSection>
-
-            <DrawerSection>
-              <Title level={5} className="mb-0">
-                Agent details
-              </Title>
-              <JsonBlock>{formatJson(app.details)}</JsonBlock>
-            </DrawerSection>
-
-            <DrawerSection>
-              <Title level={5} className="mb-0">
-                Parameters
-              </Title>
-              <JsonBlock>{formatJson(app.param_need)}</JsonBlock>
+              <ConfigSummary className="mt-3">
+                {getAppConfigurationSummary(app, teamModes).map((item) => (
+                  <ConfigSummaryItem key={item.label}>
+                    <DetailLabel>{item.label}</DetailLabel>
+                    <DetailValue>{item.value}</DetailValue>
+                  </ConfigSummaryItem>
+                ))}
+              </ConfigSummary>
             </DrawerSection>
 
             <DrawerSection>
               <Title level={5} className="mb-0">
                 Recommended questions
               </Title>
-              <JsonBlock>{formatJson(app.recommend_questions)}</JsonBlock>
+              {getRecommendQuestions(app).length ? (
+                <ConfigSummary className="mt-3">
+                  {getRecommendQuestions(app).map((item, index) => (
+                    <ConfigSummaryItem key={`${item.question}-${index}`}>
+                      <DetailValue>{item.question}</DetailValue>
+                    </ConfigSummaryItem>
+                  ))}
+                </ConfigSummary>
+              ) : (
+                <Paragraph className="gray-7 mt-3 mb-0">
+                  No recommended questions configured.
+                </Paragraph>
+              )}
             </DrawerSection>
           </>
         )}
@@ -1017,13 +1322,18 @@ function ResourceEditor({
   return (
     <div>
       {resources.map((resource, index) => {
-        const options = resource.type ? resourceOptions[resource.type] || [] : [];
+        const options = resource.type
+          ? resourceOptions[resource.type] || []
+          : [];
         return (
           <ResourceRow key={`${resource.name || 'resource'}-${index}`}>
             <Select
               placeholder="Resource type"
               value={resource.type}
-              options={resourceTypes.map((type) => ({ label: type, value: type }))}
+              options={resourceTypes.map((type) => ({
+                label: type,
+                value: type,
+              }))}
               onChange={(type) => {
                 onLoadOptions(type);
                 updateAt(index, {
@@ -1206,8 +1516,11 @@ function AgentConfiguration({
                 }
               >
                 {({ getFieldValue }) =>
-                  getFieldValue(['agent_details', agentName, 'llm_strategy']) ===
-                  'priority' ? (
+                  getFieldValue([
+                    'agent_details',
+                    agentName,
+                    'llm_strategy',
+                  ]) === 'priority' ? (
                     <Form.Item
                       label="Priority models"
                       name={['agent_details', agentName, 'llm_strategy_value']}
@@ -1298,8 +1611,12 @@ function NativeConfiguration({
   onLoadOptions: (type: string) => void;
 }) {
   const chatScene = Form.useWatch('chat_scene');
-  const scene = catalog.nativeScenes.find((item) => item.chat_scene === chatScene);
-  const resourceNeed = scene?.param_need?.find((item) => item.type === 'resource');
+  const scene = catalog.nativeScenes.find(
+    (item) => item.chat_scene === chatScene,
+  );
+  const resourceNeed = scene?.param_need?.find(
+    (item) => item.type === 'resource',
+  );
   const resourceType =
     typeof resourceNeed?.value === 'string' ? resourceNeed.value : undefined;
 
@@ -1364,7 +1681,10 @@ function NativeConfiguration({
         <Select
           allowClear
           placeholder="Use default model"
-          options={catalog.models.map((model) => ({ label: model, value: model }))}
+          options={catalog.models.map((model) => ({
+            label: model,
+            value: model,
+          }))}
         />
       </Form.Item>
       <Form.Item label="Prompt" name="prompt_template">
@@ -1396,7 +1716,9 @@ function RecommendQuestionsEditor() {
           <Title level={5} className="mb-0">
             Recommended questions
           </Title>
-          <Text className="gray-7">Shown to users before they start asking.</Text>
+          <Text className="gray-7">
+            Shown to users before they start asking.
+          </Text>
         </div>
       </PanelTitle>
       <Form.List name="recommend_questions">
@@ -1445,58 +1767,54 @@ function RunApplicationPanel({
   disabled: boolean;
 }) {
   const [question, setQuestion] = useState('');
-  const [output, setOutput] = useState('');
+  const [messages, setMessages] = useState<RuntimeMessage[]>([]);
+  const [convUid, setConvUid] = useState('');
   const [running, setRunning] = useState(false);
 
-  const runApp = async () => {
-    if (!question.trim()) return;
+  useEffect(() => {
+    setMessages([]);
+    setConvUid('');
+    setQuestion('');
+  }, [app.app_code]);
+
+  const ensureDialogue = async () => {
+    if (convUid) return convUid;
+    const dialogue = await createAppDialogue(app);
+    setConvUid(dialogue.convUid);
+    return dialogue.convUid;
+  };
+
+  const runApp = async (input = question) => {
+    if (!input.trim()) return;
     setRunning(true);
-    setOutput('');
+    const userMessage: RuntimeMessage = {
+      id: `${Date.now()}-user`,
+      role: 'user',
+      content: input,
+    };
+    setMessages((current) => [...current, userMessage]);
+    setQuestion('');
     try {
-      const chatMode =
-        app.team_mode === 'native_app' ? getChatScene(app) : 'chat_agent';
-      const dialogue = await fetchDbgpt<DbgptDialogue>(
-        `/api/v1/chat/dialogue/new?chat_mode=${encodeURIComponent(chatMode)}`,
+      const currentConvUid = await ensureDialogue();
+      const answer = await sendAppChat(app, currentConvUid, input);
+      setMessages((current) => [
+        ...current,
         {
-          method: 'POST',
-          body: JSON.stringify({ chat_mode: chatMode }),
+          id: `${Date.now()}-assistant`,
+          role: 'assistant',
+          content: answer,
         },
-      );
-      const selectParam =
-        app.team_mode === 'native_app'
-          ? app.param_need?.find((item) => item.type === 'resource')?.bind_value ||
-            ''
-          : app.app_code;
-      const body = {
-        conv_uid: dialogue.conv_uid,
-        app_code: app.app_code,
-        chat_mode: chatMode,
-        user_input: question,
-        model_name:
-          app.param_need?.find((item) => item.type === 'model')?.value ||
-          undefined,
-        select_param: selectParam,
-        temperature:
-          app.param_need?.find((item) => item.type === 'temperature')?.value ||
-          undefined,
-        max_new_tokens:
-          app.param_need?.find((item) => item.type === 'max_new_tokens')?.value ||
-          undefined,
-      };
-      const response = await fetch('/api/dbgpt/api/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(errorText || `Chat failed with HTTP ${response.status}`);
-      }
-      setOutput(await readStreamResponse(response));
+      ]);
     } catch (err) {
-      setOutput(
-        err instanceof Error ? err.message : 'Application run failed.',
-      );
+      setMessages((current) => [
+        ...current,
+        {
+          id: `${Date.now()}-error`,
+          role: 'assistant',
+          content:
+            err instanceof Error ? err.message : 'Application run failed.',
+        },
+      ]);
     } finally {
       setRunning(false);
     }
@@ -1507,12 +1825,14 @@ function RunApplicationPanel({
       <PanelTitle>
         <div>
           <Title level={5} className="mb-0">
-            Run
+            Chat
           </Title>
-          <Text className="gray-7">Create a DB-GPT dialogue and test this app.</Text>
+          <Text className="gray-7">
+            Creates a DB-GPT dialogue and calls this published application.
+          </Text>
         </div>
         <Tag color={disabled ? 'orange' : 'green'}>
-          {disabled ? 'Needs config' : 'Runnable'}
+          {disabled ? 'Needs config' : convUid ? 'Dialogue active' : 'Ready'}
         </Tag>
       </PanelTitle>
       <RunPanel>
@@ -1524,31 +1844,304 @@ function RunApplicationPanel({
             description="The app has no usable agent, workflow, or bound native resource yet."
           />
         )}
-        <Input.TextArea
-          value={question}
-          disabled={disabled}
-          placeholder="Ask a question to test this application"
-          autoSize={{ minRows: 3, maxRows: 6 }}
-          onChange={(event) => setQuestion(event.target.value)}
-        />
-        <Button
-          type="primary"
-          icon={<SendOutlined />}
-          disabled={disabled || !question.trim()}
-          loading={running}
-          onClick={runApp}
-        >
-          Run app
-        </Button>
-        <RunOutput>{output || 'Response will appear here.'}</RunOutput>
+        <ChatSession>
+          <ChatSessionMessages>
+            {messages.length ? (
+              messages.map((item) => (
+                <ChatSessionMessage key={item.id} $role={item.role}>
+                  <ChatSessionBubble $role={item.role}>
+                    {item.content}
+                  </ChatSessionBubble>
+                </ChatSessionMessage>
+              ))
+            ) : (
+              <Paragraph className="gray-7 mb-0">
+                Start a conversation with this application.
+              </Paragraph>
+            )}
+          </ChatSessionMessages>
+          <ChatSessionComposer>
+            <Input.TextArea
+              value={question}
+              disabled={disabled || running}
+              placeholder="Ask this application"
+              autoSize={{ minRows: 3, maxRows: 6 }}
+              onChange={(event) => setQuestion(event.target.value)}
+              onPressEnter={(event) => {
+                if (!event.shiftKey) {
+                  event.preventDefault();
+                  runApp();
+                }
+              }}
+            />
+            <div className="d-flex justify-space-between align-center mt-3">
+              <Text className="gray-7 text-sm">
+                {convUid ? `Conversation ${convUid}` : 'New conversation'}
+              </Text>
+              <Button
+                type="primary"
+                icon={<SendOutlined />}
+                disabled={disabled || !question.trim()}
+                loading={running}
+                onClick={() => runApp()}
+              >
+                Send
+              </Button>
+            </div>
+          </ChatSessionComposer>
+        </ChatSession>
       </RunPanel>
     </Panel>
   );
 }
 
+function ApplicationChatView({
+  session,
+  teamModes,
+  actionLoading,
+  onBack,
+  onConfigure,
+  onOperate,
+  onCopyShareLink,
+}: {
+  session: ChatSessionState;
+  teamModes: DbgptTeamMode[];
+  actionLoading: string | null;
+  onBack: () => void;
+  onConfigure: (app: DbgptApp) => void;
+  onOperate: (app: DbgptApp) => void;
+  onCopyShareLink: (app: DbgptApp) => void;
+}) {
+  const { app, convUid, chatMode } = session;
+  const [question, setQuestion] = useState('');
+  const [messages, setMessages] = useState<RuntimeMessage[]>([]);
+  const [running, setRunning] = useState(false);
+  const published = isPublished(app);
+  const runnable = published && getAppCompleteness(app);
+  const publishKey = `${published ? 'unpublish' : 'publish'}:${app.app_code}`;
+  const recommendedQuestions = getRecommendQuestions(app).filter(
+    (item) => item.question,
+  );
+
+  useEffect(() => {
+    setMessages([]);
+    setQuestion('');
+  }, [app.app_code, convUid]);
+
+  const send = async (input = question) => {
+    if (!input.trim() || running || !runnable) return;
+    setRunning(true);
+    setQuestion('');
+    setMessages((current) => [
+      ...current,
+      {
+        id: `${Date.now()}-user`,
+        role: 'user',
+        content: input,
+      },
+    ]);
+    try {
+      const answer = await sendAppChat(app, convUid, input);
+      setMessages((current) => [
+        ...current,
+        {
+          id: `${Date.now()}-assistant`,
+          role: 'assistant',
+          content: answer,
+        },
+      ]);
+    } catch (err) {
+      setMessages((current) => [
+        ...current,
+        {
+          id: `${Date.now()}-error`,
+          role: 'assistant',
+          content:
+            err instanceof Error ? err.message : 'Application chat failed.',
+        },
+      ]);
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <ConstructLayout
+      activeKey="applications"
+      icon={<SendOutlined />}
+      title={app.app_name}
+      description="Application chat session created from DB-GPT dialogue runtime."
+      actions={
+        <>
+          <Button icon={<LeftOutlined />} onClick={onBack}>
+            Back to apps
+          </Button>
+          <Button
+            icon={<ShareAltOutlined />}
+            onClick={() => onCopyShareLink(app)}
+          >
+            Copy app link
+          </Button>
+          <Button icon={<AppstoreOutlined />} onClick={() => onConfigure(app)}>
+            Configure
+          </Button>
+        </>
+      }
+    >
+      <ChatWorkspace>
+        <ChatMain>
+          <ChatHeader>
+            <div style={{ minWidth: 0 }}>
+              <Title level={5} className="mb-0">
+                {app.app_name}
+              </Title>
+              <AppMeta>
+                <Tag>{getModeLabel(app.team_mode, teamModes)}</Tag>
+                <StatusTag status={published ? 'published' : 'unpublished'} />
+                <Tag>{chatMode}</Tag>
+              </AppMeta>
+            </div>
+            <FooterActions>
+              <Button
+                icon={published ? <StopOutlined /> : <RocketOutlined />}
+                loading={actionLoading === publishKey}
+                onClick={() => onOperate(app)}
+              >
+                {published ? 'Unpublish' : 'Publish'}
+              </Button>
+            </FooterActions>
+          </ChatHeader>
+          <ChatBody>
+            {!runnable && (
+              <Alert
+                className="mb-4"
+                type="warning"
+                showIcon
+                message="This application is not callable yet"
+                description="Publish the application and complete its agent, workflow, or native app configuration before chat."
+              />
+            )}
+            {messages.length ? (
+              messages.map((item) => (
+                <ChatSessionMessage key={item.id} $role={item.role}>
+                  <ChatSessionBubble $role={item.role}>
+                    {item.content}
+                  </ChatSessionBubble>
+                </ChatSessionMessage>
+              ))
+            ) : (
+              <ChatEmptyState>
+                <div>
+                  <Title level={5}>Start a conversation</Title>
+                  <Paragraph className="gray-7 mb-0">
+                    This session calls DB-GPT with the application code and
+                    dialogue id, matching the DB-GPT application chat path.
+                  </Paragraph>
+                </div>
+              </ChatEmptyState>
+            )}
+          </ChatBody>
+          <ChatComposer>
+            <Input.TextArea
+              value={question}
+              disabled={!runnable || running}
+              placeholder="Ask this application"
+              autoSize={{ minRows: 2, maxRows: 6 }}
+              onChange={(event) => setQuestion(event.target.value)}
+              onPressEnter={(event) => {
+                if (!event.shiftKey) {
+                  event.preventDefault();
+                  send();
+                }
+              }}
+            />
+            <div className="d-flex justify-space-between align-center mt-3">
+              <Text className="gray-7 text-sm">Conversation {convUid}</Text>
+              <Button
+                type="primary"
+                icon={<SendOutlined />}
+                disabled={!runnable || !question.trim()}
+                loading={running}
+                onClick={() => send()}
+              >
+                Send
+              </Button>
+            </div>
+          </ChatComposer>
+        </ChatMain>
+        <ChatSide>
+          <Panel>
+            <Title level={5} className="mb-0">
+              Runtime
+            </Title>
+            <DetailGrid className="mt-3">
+              <DetailItem>
+                <DetailLabel>Work mode</DetailLabel>
+                <DetailValue>
+                  {getModeLabel(app.team_mode, teamModes)}
+                </DetailValue>
+              </DetailItem>
+              <DetailItem>
+                <DetailLabel>Chat scene</DetailLabel>
+                <DetailValue>{chatMode}</DetailValue>
+              </DetailItem>
+              <DetailItem>
+                <DetailLabel>Application code</DetailLabel>
+                <DetailValue>{app.app_code}</DetailValue>
+              </DetailItem>
+              <DetailItem>
+                <DetailLabel>Dialogue</DetailLabel>
+                <DetailValue>{convUid}</DetailValue>
+              </DetailItem>
+            </DetailGrid>
+          </Panel>
+          <Panel>
+            <Title level={5} className="mb-0">
+              Configuration
+            </Title>
+            <ConfigSummary className="mt-3">
+              {getAppConfigurationSummary(app, teamModes).map((item) => (
+                <ConfigSummaryItem key={item.label}>
+                  <DetailLabel>{item.label}</DetailLabel>
+                  <DetailValue>{item.value}</DetailValue>
+                </ConfigSummaryItem>
+              ))}
+            </ConfigSummary>
+          </Panel>
+          <Panel>
+            <Title level={5} className="mb-0">
+              Recommended questions
+            </Title>
+            {recommendedQuestions.length ? (
+              <ConfigSummary className="mt-3">
+                {recommendedQuestions.map((item, index) => (
+                  <Button
+                    key={`${item.question}-${index}`}
+                    disabled={!runnable || running}
+                    onClick={() => send(item.question)}
+                  >
+                    {item.question}
+                  </Button>
+                ))}
+              </ConfigSummary>
+            ) : (
+              <Paragraph className="gray-7 mt-3 mb-0">
+                No recommended questions configured.
+              </Paragraph>
+            )}
+          </Panel>
+        </ChatSide>
+      </ChatWorkspace>
+    </ConstructLayout>
+  );
+}
+
 function buildConfigureInitialValues(app: DbgptApp): ConfigureFormValues {
-  const firstResource = app.param_need?.find((item) => item.type === 'resource');
-  const getParam = (type: string) => app.param_need?.find((item) => item.type === type);
+  const firstResource = app.param_need?.find(
+    (item) => item.type === 'resource',
+  );
+  const getParam = (type: string) =>
+    app.param_need?.find((item) => item.type === type);
   if (['single_agent', 'auto_plan'].includes(app.team_mode || '')) {
     const agentDetails: ConfigureFormValues['agent_details'] = {};
     (app.details || []).forEach((detail) => {
@@ -1640,8 +2233,9 @@ function buildConfigurePayload(
     const scene = catalog.nativeScenes.find(
       (item) => item.chat_scene === values.chat_scene,
     );
-    const resourceType = scene?.param_need?.find((item) => item.type === 'resource')
-      ?.value;
+    const resourceType = scene?.param_need?.find(
+      (item) => item.type === 'resource',
+    )?.value;
     base.team_context = scene
       ? {
           chat_scene: scene.chat_scene,
@@ -1675,9 +2269,9 @@ export default function Applications() {
   const [resourceOptions, setResourceOptions] = useState<
     Record<string, DbgptResourceOption[]>
   >({});
-  const [resourceLoading, setResourceLoading] = useState<Record<string, boolean>>(
-    {},
-  );
+  const [resourceLoading, setResourceLoading] = useState<
+    Record<string, boolean>
+  >({});
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [activeKey, setActiveKey] = useState<TabKey>('all');
@@ -1698,7 +2292,10 @@ export default function Applications() {
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [selectedApp, setSelectedApp] = useState<DbgptApp | null>(null);
   const [configuringApp, setConfiguringApp] = useState<DbgptApp | null>(null);
-  const settingsQuery = useGetSettingsQuery({ fetchPolicy: 'cache-and-network' });
+  const [chatSession, setChatSession] = useState<ChatSessionState | null>(null);
+  const settingsQuery = useGetSettingsQuery({
+    fetchPolicy: 'cache-and-network',
+  });
   const diagramQuery = useDiagramQuery({ fetchPolicy: 'cache-and-network' });
 
   const dataSource = settingsQuery.data?.settings?.dataSource;
@@ -1909,6 +2506,8 @@ export default function Applications() {
 
   const openConfigure = async (app: DbgptApp) => {
     setDetailsOpen(false);
+    clearApplicationUrlState();
+    setChatSession(null);
     setConfiguringApp(app);
     configureForm.resetFields();
     try {
@@ -1932,8 +2531,115 @@ export default function Applications() {
       }
     } catch (err) {
       message.error(
-        err instanceof Error ? err.message : 'Unable to open app configuration.',
+        err instanceof Error
+          ? err.message
+          : 'Unable to open app configuration.',
       );
+    }
+  };
+
+  const startChat = async (app: DbgptApp) => {
+    const fullApp = await fetchAppInfo(app).catch(() => app);
+    if (!isPublished(fullApp)) {
+      message.warning('Publish this application before chat.');
+      return;
+    }
+    if (!getAppCompleteness(fullApp)) {
+      message.warning('Complete application configuration before chat.');
+      openConfigure(fullApp);
+      return;
+    }
+    setActionLoading(`chat:${fullApp.app_code}`);
+    try {
+      const dialogue = await createAppDialogue(fullApp);
+      setDetailsOpen(false);
+      setConfiguringApp(null);
+      setChatSession({
+        app: fullApp,
+        convUid: dialogue.convUid,
+        chatMode: dialogue.chatMode,
+      });
+      if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        url.searchParams.set('mode', 'chat');
+        url.searchParams.set('app_code', fullApp.app_code);
+        window.history.replaceState(null, '', url.toString());
+      }
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(
+          'cur_dialog_info',
+          JSON.stringify({
+            chat_scene: dialogue.chatMode,
+            app_code: fullApp.app_code,
+          }),
+        );
+      }
+    } catch (err) {
+      message.error(
+        err instanceof Error
+          ? err.message
+          : 'Unable to create application chat.',
+      );
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const openSharedChat = useCallback(
+    async (appCode: string) => {
+      if (!appCode || chatSession?.app.app_code === appCode) return;
+      setActionLoading(`chat:${appCode}`);
+      try {
+        const data = await fetchDbgpt<DbgptAppListResponse>(
+          `/api/v1/app/list?page=1&page_size=10000`,
+          {
+            method: 'POST',
+            body: JSON.stringify({ page: 1, page_size: 10000 }),
+          },
+        );
+        const app = (data?.app_list || []).find(
+          (item) => item.app_code === appCode,
+        );
+        if (!app) {
+          throw new Error('Shared application was not found.');
+        }
+        await startChat(app);
+      } catch (err) {
+        message.error(
+          err instanceof Error
+            ? err.message
+            : 'Unable to open shared application.',
+        );
+      } finally {
+        setActionLoading(null);
+      }
+    },
+    [chatSession?.app.app_code],
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('mode') !== 'chat') return;
+    const appCode = params.get('app_code');
+    if (appCode) openSharedChat(appCode);
+  }, [openSharedChat]);
+
+  const copyAppShareLink = async (app: DbgptApp) => {
+    try {
+      await copyToClipboard(getApplicationShareUrl(app));
+      message.success('Application link copied.');
+    } catch {
+      message.error('Unable to copy application link.');
+    }
+  };
+
+  const copyDingTalkShareLink = async (app: DbgptApp) => {
+    try {
+      await copyToClipboard(getDingTalkShareUrl(app));
+      message.success('DingTalk link copied.');
+    } catch {
+      message.error('Unable to copy DingTalk link.');
     }
   };
 
@@ -1957,9 +2663,7 @@ export default function Applications() {
         },
       );
       message.success(
-        modalMode === 'edit'
-          ? 'Application updated.'
-          : 'Application created.',
+        modalMode === 'edit' ? 'Application updated.' : 'Application created.',
       );
       setModalOpen(false);
       await loadApps(modalMode === 'edit' ? page : 1);
@@ -1992,10 +2696,22 @@ export default function Applications() {
         method: 'POST',
         body: JSON.stringify({ app_code: app.app_code }),
       });
-      message.success(published ? 'Application unpublished.' : 'Application published.');
+      message.success(
+        published ? 'Application unpublished.' : 'Application published.',
+      );
+      const nextPublished = published ? 'false' : 'true';
       await loadApps(page);
       if (selectedApp?.app_code === app.app_code) {
-        setSelectedApp({ ...selectedApp, published: published ? 'false' : 'true' });
+        setSelectedApp({ ...selectedApp, published: nextPublished });
+      }
+      if (configuringApp?.app_code === app.app_code) {
+        setConfiguringApp({ ...configuringApp, published: nextPublished });
+      }
+      if (chatSession?.app.app_code === app.app_code) {
+        setChatSession({
+          ...chatSession,
+          app: { ...chatSession.app, published: nextPublished },
+        });
       }
     } catch (err) {
       message.error(
@@ -2046,6 +2762,9 @@ export default function Applications() {
         setDetailsOpen(false);
         setSelectedApp(null);
       }
+      if (chatSession?.app.app_code === app.app_code) {
+        setChatSession(null);
+      }
       await loadApps(page);
     } catch (err) {
       message.error(
@@ -2073,6 +2792,9 @@ export default function Applications() {
       <Menu
         onClick={(info) => {
           info.domEvent.stopPropagation();
+          if (info.key === 'chat') startChat(app);
+          if (info.key === 'share') copyAppShareLink(app);
+          if (info.key === 'dingtalk') copyDingTalkShareLink(app);
           if (info.key === 'details') openDetails(app);
           if (info.key === 'configure') openConfigure(app);
           if (info.key === 'edit') openEditModal(app);
@@ -2080,8 +2802,21 @@ export default function Applications() {
           if (info.key === 'delete') confirmDelete(app);
         }}
       >
+        <Menu.Item
+          key="chat"
+          icon={<SendOutlined />}
+          disabled={!published || !getAppCompleteness(app)}
+        >
+          Chat
+        </Menu.Item>
+        <Menu.Item key="share" icon={<ShareAltOutlined />}>
+          Copy app link
+        </Menu.Item>
+        <Menu.Item key="dingtalk" icon={<ShareAltOutlined />}>
+          Copy DingTalk link
+        </Menu.Item>
         <Menu.Item key="details" icon={<AppstoreOutlined />}>
-          Details
+          Runtime details
         </Menu.Item>
         <Menu.Item key="configure" icon={<RocketOutlined />}>
           Configure
@@ -2103,6 +2838,23 @@ export default function Applications() {
     );
   };
 
+  if (chatSession) {
+    return (
+      <ApplicationChatView
+        session={chatSession}
+        teamModes={teamModes}
+        actionLoading={actionLoading}
+        onBack={() => {
+          setChatSession(null);
+          clearApplicationUrlState();
+        }}
+        onConfigure={openConfigure}
+        onOperate={operateApp}
+        onCopyShareLink={copyAppShareLink}
+      />
+    );
+  }
+
   if (configuringApp) {
     const runnable = getAppCompleteness(configuringApp);
     return (
@@ -2118,6 +2870,8 @@ export default function Applications() {
               icon={<LeftOutlined />}
               onClick={() => {
                 setConfiguringApp(null);
+                setChatSession(null);
+                clearApplicationUrlState();
                 configureForm.resetFields();
               }}
             >
@@ -2157,11 +2911,20 @@ export default function Applications() {
               </div>
             </ConfigureTitle>
             <FooterActions>
-              <Button icon={<EditOutlined />} onClick={() => openEditModal(configuringApp)}>
+              <Button
+                icon={<EditOutlined />}
+                onClick={() => openEditModal(configuringApp)}
+              >
                 Edit base info
               </Button>
               <Button
-                icon={isPublished(configuringApp) ? <StopOutlined /> : <RocketOutlined />}
+                icon={
+                  isPublished(configuringApp) ? (
+                    <StopOutlined />
+                  ) : (
+                    <RocketOutlined />
+                  )
+                }
                 onClick={() => operateApp(configuringApp)}
               >
                 {isPublished(configuringApp) ? 'Unpublish' : 'Publish'}
@@ -2176,7 +2939,11 @@ export default function Applications() {
               showIcon
               message="Application catalog failed to load"
               description={catalogError}
-              action={<Button size="small" onClick={loadCatalog}>Retry</Button>}
+              action={
+                <Button size="small" onClick={loadCatalog}>
+                  Retry
+                </Button>
+              }
             />
           )}
 
@@ -2230,7 +2997,11 @@ export default function Applications() {
       description="Manage published runtimes, workflow agents, and the WrenAI GenBI entry inside this workspace."
       loading={loading && apps.length === 0}
       actions={
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
+          onClick={openCreateModal}
+        >
           Create app
         </Button>
       }
@@ -2297,7 +3068,10 @@ export default function Applications() {
                       </AppMeta>
                     </div>
                   </AppHeader>
-                  <Paragraph className="gray-7 mt-4 mb-0" ellipsis={{ rows: 3 }}>
+                  <Paragraph
+                    className="gray-7 mt-4 mb-0"
+                    ellipsis={{ rows: 3 }}
+                  >
                     {card.description}
                   </Paragraph>
                   <AppFooter>
@@ -2321,9 +3095,9 @@ export default function Applications() {
                     $interactive
                     role="button"
                     tabIndex={0}
-                    onClick={() => openDetails(app)}
+                    onClick={() => openConfigure(app)}
                     onKeyDown={(event) => {
-                      if (event.key === 'Enter') openDetails(app);
+                      if (event.key === 'Enter') openConfigure(app);
                     }}
                   >
                     <AppHeader>
@@ -2346,7 +3120,10 @@ export default function Applications() {
                         </AppMeta>
                       </div>
                     </AppHeader>
-                    <Paragraph className="gray-7 mt-4 mb-0" ellipsis={{ rows: 3 }}>
+                    <Paragraph
+                      className="gray-7 mt-4 mb-0"
+                      ellipsis={{ rows: 3 }}
+                    >
                       {app.app_describe || 'No description.'}
                     </Paragraph>
                     <AppFooter>
@@ -2357,7 +3134,29 @@ export default function Applications() {
                       <FooterActions>
                         <Button
                           size="small"
-                          type={runnable ? 'default' : 'primary'}
+                          type="primary"
+                          icon={<SendOutlined />}
+                          loading={actionLoading === `chat:${app.app_code}`}
+                          disabled={!published || !runnable}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            startChat(app);
+                          }}
+                        >
+                          Chat
+                        </Button>
+                        <Button
+                          size="small"
+                          icon={<ShareAltOutlined />}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            copyAppShareLink(app);
+                          }}
+                        >
+                          Share
+                        </Button>
+                        <Button
+                          size="small"
                           onClick={(event) => {
                             event.stopPropagation();
                             openConfigure(app);
@@ -2424,6 +3223,8 @@ export default function Applications() {
         teamModes={teamModes}
         actionLoading={actionLoading}
         onClose={() => setDetailsOpen(false)}
+        onChat={startChat}
+        onCopyShareLink={copyAppShareLink}
         onEdit={openEditModal}
         onConfigure={openConfigure}
         onOperate={operateApp}
