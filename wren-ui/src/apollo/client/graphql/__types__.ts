@@ -691,6 +691,7 @@ export type Mutation = {
   createSqlPair: SqlPair;
   createThread: Thread;
   createThreadResponse: ThreadResponse;
+  createThreadResponseShare: ThreadResponseShare;
   createView: ViewInfo;
   deleteCalculatedField: Scalars['Boolean'];
   deleteDashboardItem: Scalars['Boolean'];
@@ -813,6 +814,11 @@ export type MutationCreateThreadArgs = {
 export type MutationCreateThreadResponseArgs = {
   data: CreateThreadResponseInput;
   threadId: Scalars['Int'];
+};
+
+
+export type MutationCreateThreadResponseShareArgs = {
+  responseId: Scalars['Int'];
 };
 
 
@@ -1163,6 +1169,7 @@ export type Query = {
   onboardingStatus: OnboardingStatusResponse;
   schemaChange: SchemaChange;
   settings: Settings;
+  sharedThreadResponse: ThreadResponseShare;
   sqlPairs: Array<Maybe<SqlPair>>;
   suggestedQuestions: SuggestedQuestionResponse;
   thread: DetailedThread;
@@ -1210,6 +1217,11 @@ export type QueryModelArgs = {
 
 export type QueryNativeSqlArgs = {
   responseId: Scalars['Int'];
+};
+
+
+export type QuerySharedThreadResponseArgs = {
+  token: Scalars['String'];
 };
 
 
@@ -1485,6 +1497,17 @@ export type ThreadResponseChartDetail = {
   error?: Maybe<Error>;
   queryId?: Maybe<Scalars['String']>;
   status: ChartTaskStatus;
+};
+
+export type ThreadResponseShare = {
+  __typename?: 'ThreadResponseShare';
+  createdAt?: Maybe<Scalars['String']>;
+  projectId: Scalars['Int'];
+  response: ThreadResponse;
+  responseId: Scalars['Int'];
+  shareUrl: Scalars['String'];
+  threadId: Scalars['Int'];
+  token: Scalars['String'];
 };
 
 export type ThreadResponseUniqueWhereInput = {

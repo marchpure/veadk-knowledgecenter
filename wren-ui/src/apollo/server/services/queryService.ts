@@ -1,6 +1,9 @@
 import { DataSourceName } from '@server/types';
 import { Manifest } from '@server/mdl/type';
-import { IWrenEngineAdaptor } from '../adaptors/wrenEngineAdaptor';
+import {
+  DuckDBPrepareOptions,
+  IWrenEngineAdaptor,
+} from '../adaptors/wrenEngineAdaptor';
 import {
   SupportedDataSource,
   IIbisAdaptor,
@@ -109,6 +112,7 @@ export class QueryService implements IQueryService {
     } = options;
     const { type: dataSource, connectionInfo } = project;
     if (this.useEngine(dataSource)) {
+      await this.prepareDuckDBForQuery(connectionInfo);
       if (dryRun) {
         logger.debug('Using wren engine to dry run');
         await this.wrenEngineAdaptor.dryRun(sql, {
@@ -178,6 +182,26 @@ export class QueryService implements IQueryService {
     } else {
       return false;
     }
+  }
+
+  private concatDuckDBInitSql(initSql = '', extensions: string[] = []) {
+    const installExtensions = extensions
+      .filter(Boolean)
+      .map((extension) => `INSTALL ${extension};`)
+      .join('\n');
+    return [installExtensions, initSql].filter(Boolean).join('\n');
+  }
+
+  private async prepareDuckDBForQuery(connectionInfo: any) {
+    const initSql = connectionInfo?.initSql;
+    if (typeof initSql !== 'string' || !initSql.trim()) {
+      return;
+    }
+
+    await this.wrenEngineAdaptor.prepareDuckDB({
+      initSql: this.concatDuckDBInitSql(initSql, connectionInfo.extensions),
+      sessionProps: connectionInfo.configurations || {},
+    } as DuckDBPrepareOptions);
   }
 
   private checkDataSourceIsSupported(dataSource: DataSourceName) {

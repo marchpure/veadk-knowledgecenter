@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { isEmpty, debounce } from 'lodash';
 import clsx from 'clsx';
-import { Button, Typography, Tabs, Tag, Tooltip } from 'antd';
+import { Button, Typography, Tabs, Tag, Tooltip, message } from 'antd';
 import styled from 'styled-components';
 import CheckCircleFilled from '@ant-design/icons/CheckCircleFilled';
 import CodeFilled from '@ant-design/icons/CodeFilled';
@@ -31,6 +31,8 @@ import {
   ThreadResponseAdjustment,
   ThreadResponseAdjustmentType,
 } from '@/apollo/client/graphql/__types__';
+import { useCreateThreadResponseShareMutation } from '@/apollo/client/graphql/home.generated';
+import { Path } from '@/utils/enum';
 
 const { Title, Text } = Typography;
 
@@ -186,6 +188,26 @@ const isNeedGenerateAnswer = (answerDetail: ThreadResponseAnswerDetail) => {
   return answerDetail?.queryId === null && !isFinished && !isProcessing;
 };
 
+const getShareUrl = (token: string) => {
+  const origin = typeof window === 'undefined' ? '' : window.location.origin;
+  return `${origin}${Path.HomeShare}/${encodeURIComponent(token)}`;
+};
+
+const copyToClipboard = async (value: string) => {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand('copy');
+  document.body.removeChild(textarea);
+};
+
 export default function AnswerResult(props: Props) {
   const { threadResponse, isLastThreadResponse, isOpeningQuestion } = props;
 
@@ -219,6 +241,12 @@ export default function AnswerResult(props: Props) {
     : null;
 
   const isAdjustment = !!adjustment;
+  const [createThreadResponseShare, createThreadResponseShareResult] =
+    useCreateThreadResponseShareMutation({
+      onError: (error) => {
+        message.error(error.message || 'Unable to create share link.');
+      },
+    });
 
   const recommendedQuestionProps = getRecommendedQuestionProps(
     recommendedQuestions,
@@ -263,6 +291,23 @@ export default function AnswerResult(props: Props) {
   const onTabClick = (activeKey: string) => {
     if (activeKey === ANSWER_TAB_KEYS.CHART && !threadResponse.chartDetail) {
       onGenerateChartAnswer(id);
+    }
+  };
+
+  const onShareAnswer = async () => {
+    try {
+      const result = await createThreadResponseShare({
+        variables: { responseId: id },
+      });
+      const token = result.data?.createThreadResponseShare.token;
+      if (!token) throw new Error('Share token was not returned.');
+      const url = getShareUrl(token);
+      await copyToClipboard(url);
+      message.success('Share link copied.');
+    } catch (error) {
+      message.error(
+        error instanceof Error ? error.message : 'Unable to create share link.',
+      );
     }
   };
 
@@ -334,6 +379,16 @@ export default function AnswerResult(props: Props) {
             </Tabs.TabPane>
           </StyledTabs>
           <div className="mt-2 d-flex align-center">
+            <Button
+              type="link"
+              size="small"
+              className="mr-2"
+              icon={<ShareAltOutlined />}
+              loading={createThreadResponseShareResult.loading}
+              onClick={onShareAnswer}
+            >
+              Share answer
+            </Button>
             <Tooltip
               overlayInnerStyle={{ width: 'max-content' }}
               placement="topLeft"

@@ -40,6 +40,71 @@ export type DbgptKnowledgeStats = {
   graph_build_status?: string | null;
 };
 
+export type DbgptKnowledgeDocument = {
+  id: number;
+  doc_name: string;
+  source?: string;
+  content?: string;
+  doc_type: string;
+  chunk_size?: string | number;
+  gmt_created?: string;
+  gmt_modified?: string;
+  last_sync?: string;
+  result?: string;
+  space?: string;
+  status?: string;
+  vector_ids?: string;
+  questions?: string[];
+};
+
+export type DbgptKnowledgeDocumentResponse = {
+  data: DbgptKnowledgeDocument[];
+  page: number;
+  total: number;
+};
+
+export type DbgptKnowledgeChunk = {
+  id: string | number;
+  content: string;
+  doc_name?: string;
+  doc_type?: string;
+  document_id?: string | number;
+  gmt_created?: string;
+  gmt_modified?: string;
+  meta_info?: string;
+  recall_score?: string | number;
+};
+
+export type DbgptKnowledgeChunkResponse = {
+  data: DbgptKnowledgeChunk[];
+  page: number;
+  total: number;
+};
+
+export type DbgptChunkStrategy = {
+  strategy: string;
+  name: string;
+  parameters?: Array<{
+    param_name: string;
+    param_type: string;
+    default_value?: string | number;
+    description?: string;
+  }>;
+  suffix?: string[];
+  type?: string[];
+};
+
+export type DbgptKnowledgeSyncResponse = {
+  tasks?: number[];
+};
+
+export type DbgptRecallChunk = {
+  chunk_id: number;
+  content: string;
+  metadata: Record<string, unknown>;
+  score: number;
+};
+
 export type DbgptFlow = {
   uid: string;
   name: string;
@@ -283,6 +348,8 @@ export type DbgptAppResource = {
   type?: string;
   value?: string;
   is_dynamic?: boolean;
+  context?: unknown;
+  version?: string;
 };
 
 export type DbgptConfigurableParam = {
@@ -336,6 +403,33 @@ export type DbgptDialogue = {
   app_code?: string;
 };
 
+export type DbgptShareLink = {
+  token: string;
+  conv_uid: string;
+  share_url: string;
+};
+
+export type DbgptShareMessage = {
+  role: string;
+  context: string;
+  order?: number;
+};
+
+export type DbgptShareConversation = {
+  conv_uid: string;
+  token: string;
+  messages: DbgptShareMessage[];
+};
+
+export type DbgptChatHistoryMessage = {
+  role: string;
+  context: string;
+  order?: number;
+  time_stamp?: string | null;
+  model_name?: string | null;
+  feedback?: Record<string, unknown>;
+};
+
 export type DbgptAgent = {
   name: string;
   label?: string;
@@ -387,7 +481,16 @@ export function unwrapDbgpt<T>(payload: DbgptEnvelope<T> | T): T {
     typeof payload === 'object' &&
     ('data' in payload || 'success' in payload)
   ) {
-    return ((payload as DbgptEnvelope<T>).data ?? payload) as T;
+    const envelope = payload as DbgptEnvelope<T>;
+    if (envelope.success === false) {
+      throw new Error(
+        envelope.err_msg ||
+          envelope.err_code ||
+          'DB-GPT returned an unsuccessful response.',
+      );
+    }
+    if ('data' in envelope) return envelope.data as T;
+    return payload as T;
   }
   return payload as T;
 }

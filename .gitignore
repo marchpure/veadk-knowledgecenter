@@ -68,6 +68,7 @@ wren-ui/e2e/e2e.config.json
 
 ## next.js
 wren-ui/.next
+wren-ui/.next-*
 wren-ui/out
 
 wren-ui/.yarn/install-state.gz

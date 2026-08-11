@@ -202,6 +202,23 @@ export const THREAD_RESPONSE = gql`
   ${COMMON_RESPONSE}
 `;
 
+export const SHARED_THREAD_RESPONSE = gql`
+  query SharedThreadResponse($token: String!) {
+    sharedThreadResponse(token: $token) {
+      token
+      threadId
+      responseId
+      projectId
+      shareUrl
+      createdAt
+      response {
+        ...CommonResponse
+      }
+    }
+  }
+  ${COMMON_RESPONSE}
+`;
+
 export const CREATE_ASKING_TASK = gql`
   mutation CreateAskingTask($data: AskingTaskInput!) {
     createAskingTask(data: $data) {
@@ -266,6 +283,16 @@ export const UPDATE_THREAD_RESPONSE = gql`
     }
   }
   ${COMMON_RESPONSE}
+`;
+
+export const CREATE_THREAD_RESPONSE_SHARE = gql`
+  mutation CreateThreadResponseShare($responseId: Int!) {
+    createThreadResponseShare(responseId: $responseId) {
+      token
+      shareUrl
+      responseId
+    }
+  }
 `;
 
 // For adjust reasoning steps or SQL

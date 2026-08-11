@@ -48,6 +48,13 @@ export type ThreadResponseQueryVariables = Types.Exact<{
 
 export type ThreadResponseQuery = { __typename?: 'Query', threadResponse: { __typename?: 'ThreadResponse', id: number, threadId: number, question: string, sql?: string | null, view?: { __typename?: 'ViewInfo', id: number, name: string, statement: string, displayName: string } | null, breakdownDetail?: { __typename?: 'ThreadResponseBreakdownDetail', queryId?: string | null, status: Types.AskingTaskStatus, description?: string | null, steps?: Array<{ __typename?: 'DetailStep', summary: string, sql: string, cteName?: string | null }> | null, error?: { __typename?: 'Error', code?: string | null, shortMessage?: string | null, message?: string | null, stacktrace?: Array<string | null> | null } | null } | null, answerDetail?: { __typename?: 'ThreadResponseAnswerDetail', queryId?: string | null, status?: Types.ThreadResponseAnswerStatus | null, content?: string | null, numRowsUsedInLLM?: number | null, error?: { __typename?: 'Error', code?: string | null, shortMessage?: string | null, message?: string | null, stacktrace?: Array<string | null> | null } | null } | null, chartDetail?: { __typename?: 'ThreadResponseChartDetail', queryId?: string | null, status: Types.ChartTaskStatus, description?: string | null, chartType?: Types.ChartType | null, chartSchema?: any | null, adjustment?: boolean | null, error?: { __typename?: 'Error', code?: string | null, shortMessage?: string | null, message?: string | null, stacktrace?: Array<string | null> | null } | null } | null, askingTask?: { __typename?: 'AskingTask', status: Types.AskingTaskStatus, type?: Types.AskingTaskType | null, rephrasedQuestion?: string | null, intentReasoning?: string | null, sqlGenerationReasoning?: string | null, retrievedTables?: Array<string> | null, invalidSql?: string | null, traceId?: string | null, queryId?: string | null, candidates: Array<{ __typename?: 'ResultCandidate', sql: string, type: Types.ResultCandidateType, view?: { __typename?: 'ViewInfo', id: number, name: string, statement: string, displayName: string } | null, sqlPair?: { __typename?: 'SqlPair', id: number, question: string, sql: string, projectId: number } | null }>, error?: { __typename?: 'Error', code?: string | null, shortMessage?: string | null, message?: string | null, stacktrace?: Array<string | null> | null } | null } | null, adjustment?: { __typename?: 'ThreadResponseAdjustment', type: Types.ThreadResponseAdjustmentType, payload?: any | null } | null, adjustmentTask?: { __typename?: 'AdjustmentTask', queryId?: string | null, status?: Types.AskingTaskStatus | null, sql?: string | null, traceId?: string | null, invalidSql?: string | null, error?: { __typename?: 'Error', code?: string | null, shortMessage?: string | null, message?: string | null, stacktrace?: Array<string | null> | null } | null } | null } };
 
+export type SharedThreadResponseQueryVariables = Types.Exact<{
+  token: Types.Scalars['String'];
+}>;
+
+
+export type SharedThreadResponseQuery = { __typename?: 'Query', sharedThreadResponse: { __typename?: 'ThreadResponseShare', token: string, threadId: number, responseId: number, projectId: number, shareUrl: string, createdAt?: string | null, response: { __typename?: 'ThreadResponse', id: number, threadId: number, question: string, sql?: string | null, view?: { __typename?: 'ViewInfo', id: number, name: string, statement: string, displayName: string } | null, breakdownDetail?: { __typename?: 'ThreadResponseBreakdownDetail', queryId?: string | null, status: Types.AskingTaskStatus, description?: string | null, steps?: Array<{ __typename?: 'DetailStep', summary: string, sql: string, cteName?: string | null }> | null, error?: { __typename?: 'Error', code?: string | null, shortMessage?: string | null, message?: string | null, stacktrace?: Array<string | null> | null } | null } | null, answerDetail?: { __typename?: 'ThreadResponseAnswerDetail', queryId?: string | null, status?: Types.ThreadResponseAnswerStatus | null, content?: string | null, numRowsUsedInLLM?: number | null, error?: { __typename?: 'Error', code?: string | null, shortMessage?: string | null, message?: string | null, stacktrace?: Array<string | null> | null } | null } | null, chartDetail?: { __typename?: 'ThreadResponseChartDetail', queryId?: string | null, status: Types.ChartTaskStatus, description?: string | null, chartType?: Types.ChartType | null, chartSchema?: any | null, adjustment?: boolean | null, error?: { __typename?: 'Error', code?: string | null, shortMessage?: string | null, message?: string | null, stacktrace?: Array<string | null> | null } | null } | null, askingTask?: { __typename?: 'AskingTask', status: Types.AskingTaskStatus, type?: Types.AskingTaskType | null, rephrasedQuestion?: string | null, intentReasoning?: string | null, sqlGenerationReasoning?: string | null, retrievedTables?: Array<string> | null, invalidSql?: string | null, traceId?: string | null, queryId?: string | null, candidates: Array<{ __typename?: 'ResultCandidate', sql: string, type: Types.ResultCandidateType, view?: { __typename?: 'ViewInfo', id: number, name: string, statement: string, displayName: string } | null, sqlPair?: { __typename?: 'SqlPair', id: number, question: string, sql: string, projectId: number } | null }>, error?: { __typename?: 'Error', code?: string | null, shortMessage?: string | null, message?: string | null, stacktrace?: Array<string | null> | null } | null } | null, adjustment?: { __typename?: 'ThreadResponseAdjustment', type: Types.ThreadResponseAdjustmentType, payload?: any | null } | null, adjustmentTask?: { __typename?: 'AdjustmentTask', queryId?: string | null, status?: Types.AskingTaskStatus | null, sql?: string | null, traceId?: string | null, invalidSql?: string | null, error?: { __typename?: 'Error', code?: string | null, shortMessage?: string | null, message?: string | null, stacktrace?: Array<string | null> | null } | null } | null } } };
+
 export type CreateAskingTaskMutationVariables = Types.Exact<{
   data: Types.AskingTaskInput;
 }>;
@@ -99,6 +106,13 @@ export type UpdateThreadResponseMutationVariables = Types.Exact<{
 
 
 export type UpdateThreadResponseMutation = { __typename?: 'Mutation', updateThreadResponse: { __typename?: 'ThreadResponse', id: number, threadId: number, question: string, sql?: string | null, view?: { __typename?: 'ViewInfo', id: number, name: string, statement: string, displayName: string } | null, breakdownDetail?: { __typename?: 'ThreadResponseBreakdownDetail', queryId?: string | null, status: Types.AskingTaskStatus, description?: string | null, steps?: Array<{ __typename?: 'DetailStep', summary: string, sql: string, cteName?: string | null }> | null, error?: { __typename?: 'Error', code?: string | null, shortMessage?: string | null, message?: string | null, stacktrace?: Array<string | null> | null } | null } | null, answerDetail?: { __typename?: 'ThreadResponseAnswerDetail', queryId?: string | null, status?: Types.ThreadResponseAnswerStatus | null, content?: string | null, numRowsUsedInLLM?: number | null, error?: { __typename?: 'Error', code?: string | null, shortMessage?: string | null, message?: string | null, stacktrace?: Array<string | null> | null } | null } | null, chartDetail?: { __typename?: 'ThreadResponseChartDetail', queryId?: string | null, status: Types.ChartTaskStatus, description?: string | null, chartType?: Types.ChartType | null, chartSchema?: any | null, adjustment?: boolean | null, error?: { __typename?: 'Error', code?: string | null, shortMessage?: string | null, message?: string | null, stacktrace?: Array<string | null> | null } | null } | null, askingTask?: { __typename?: 'AskingTask', status: Types.AskingTaskStatus, type?: Types.AskingTaskType | null, rephrasedQuestion?: string | null, intentReasoning?: string | null, sqlGenerationReasoning?: string | null, retrievedTables?: Array<string> | null, invalidSql?: string | null, traceId?: string | null, queryId?: string | null, candidates: Array<{ __typename?: 'ResultCandidate', sql: string, type: Types.ResultCandidateType, view?: { __typename?: 'ViewInfo', id: number, name: string, statement: string, displayName: string } | null, sqlPair?: { __typename?: 'SqlPair', id: number, question: string, sql: string, projectId: number } | null }>, error?: { __typename?: 'Error', code?: string | null, shortMessage?: string | null, message?: string | null, stacktrace?: Array<string | null> | null } | null } | null, adjustment?: { __typename?: 'ThreadResponseAdjustment', type: Types.ThreadResponseAdjustmentType, payload?: any | null } | null, adjustmentTask?: { __typename?: 'AdjustmentTask', queryId?: string | null, status?: Types.AskingTaskStatus | null, sql?: string | null, traceId?: string | null, invalidSql?: string | null, error?: { __typename?: 'Error', code?: string | null, shortMessage?: string | null, message?: string | null, stacktrace?: Array<string | null> | null } | null } | null } };
+
+export type CreateThreadResponseShareMutationVariables = Types.Exact<{
+  responseId: Types.Scalars['Int'];
+}>;
+
+
+export type CreateThreadResponseShareMutation = { __typename?: 'Mutation', createThreadResponseShare: { __typename?: 'ThreadResponseShare', token: string, shareUrl: string, responseId: number } };
 
 export type AdjustThreadResponseMutationVariables = Types.Exact<{
   responseId: Types.Scalars['Int'];
@@ -533,6 +547,49 @@ export function useThreadResponseLazyQuery(baseOptions?: Apollo.LazyQueryHookOpt
 export type ThreadResponseQueryHookResult = ReturnType<typeof useThreadResponseQuery>;
 export type ThreadResponseLazyQueryHookResult = ReturnType<typeof useThreadResponseLazyQuery>;
 export type ThreadResponseQueryResult = Apollo.QueryResult<ThreadResponseQuery, ThreadResponseQueryVariables>;
+export const SharedThreadResponseDocument = gql`
+    query SharedThreadResponse($token: String!) {
+  sharedThreadResponse(token: $token) {
+    token
+    threadId
+    responseId
+    projectId
+    shareUrl
+    createdAt
+    response {
+      ...CommonResponse
+    }
+  }
+}
+    ${CommonResponseFragmentDoc}`;
+
+/**
+ * __useSharedThreadResponseQuery__
+ *
+ * To run a query within a React component, call `useSharedThreadResponseQuery` and pass it any options that fit your needs.
+ * When your component renders, `useSharedThreadResponseQuery` returns an object from Apollo Client that contains loading, error, and data properties
+ * you can use to render your UI.
+ *
+ * @param baseOptions options that will be passed into the query, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options;
+ *
+ * @example
+ * const { data, loading, error } = useSharedThreadResponseQuery({
+ *   variables: {
+ *      token: // value for 'token'
+ *   },
+ * });
+ */
+export function useSharedThreadResponseQuery(baseOptions: Apollo.QueryHookOptions<SharedThreadResponseQuery, SharedThreadResponseQueryVariables>) {
+        const options = {...defaultOptions, ...baseOptions}
+        return Apollo.useQuery<SharedThreadResponseQuery, SharedThreadResponseQueryVariables>(SharedThreadResponseDocument, options);
+      }
+export function useSharedThreadResponseLazyQuery(baseOptions?: Apollo.LazyQueryHookOptions<SharedThreadResponseQuery, SharedThreadResponseQueryVariables>) {
+          const options = {...defaultOptions, ...baseOptions}
+          return Apollo.useLazyQuery<SharedThreadResponseQuery, SharedThreadResponseQueryVariables>(SharedThreadResponseDocument, options);
+        }
+export type SharedThreadResponseQueryHookResult = ReturnType<typeof useSharedThreadResponseQuery>;
+export type SharedThreadResponseLazyQueryHookResult = ReturnType<typeof useSharedThreadResponseLazyQuery>;
+export type SharedThreadResponseQueryResult = Apollo.QueryResult<SharedThreadResponseQuery, SharedThreadResponseQueryVariables>;
 export const CreateAskingTaskDocument = gql`
     mutation CreateAskingTask($data: AskingTaskInput!) {
   createAskingTask(data: $data) {
@@ -766,6 +823,41 @@ export function useUpdateThreadResponseMutation(baseOptions?: Apollo.MutationHoo
 export type UpdateThreadResponseMutationHookResult = ReturnType<typeof useUpdateThreadResponseMutation>;
 export type UpdateThreadResponseMutationResult = Apollo.MutationResult<UpdateThreadResponseMutation>;
 export type UpdateThreadResponseMutationOptions = Apollo.BaseMutationOptions<UpdateThreadResponseMutation, UpdateThreadResponseMutationVariables>;
+export const CreateThreadResponseShareDocument = gql`
+    mutation CreateThreadResponseShare($responseId: Int!) {
+  createThreadResponseShare(responseId: $responseId) {
+    token
+    shareUrl
+    responseId
+  }
+}
+    `;
+export type CreateThreadResponseShareMutationFn = Apollo.MutationFunction<CreateThreadResponseShareMutation, CreateThreadResponseShareMutationVariables>;
+
+/**
+ * __useCreateThreadResponseShareMutation__
+ *
+ * To run a mutation, you first call `useCreateThreadResponseShareMutation` within a React component and pass it any options that fit your needs.
+ * When your component renders, `useCreateThreadResponseShareMutation` returns a tuple that includes:
+ * - A mutate function that you can call at any time to execute the mutation
+ * - An object with fields that represent the current status of the mutation's execution
+ *
+ * @param baseOptions options that will be passed into the mutation, supported options are listed on: https://www.apollographql.com/docs/react/api/react-hooks/#options-2;
+ *
+ * @example
+ * const [createThreadResponseShareMutation, { data, loading, error }] = useCreateThreadResponseShareMutation({
+ *   variables: {
+ *      responseId: // value for 'responseId'
+ *   },
+ * });
+ */
+export function useCreateThreadResponseShareMutation(baseOptions?: Apollo.MutationHookOptions<CreateThreadResponseShareMutation, CreateThreadResponseShareMutationVariables>) {
+        const options = {...defaultOptions, ...baseOptions}
+        return Apollo.useMutation<CreateThreadResponseShareMutation, CreateThreadResponseShareMutationVariables>(CreateThreadResponseShareDocument, options);
+      }
+export type CreateThreadResponseShareMutationHookResult = ReturnType<typeof useCreateThreadResponseShareMutation>;
+export type CreateThreadResponseShareMutationResult = Apollo.MutationResult<CreateThreadResponseShareMutation>;
+export type CreateThreadResponseShareMutationOptions = Apollo.BaseMutationOptions<CreateThreadResponseShareMutation, CreateThreadResponseShareMutationVariables>;
 export const AdjustThreadResponseDocument = gql`
     mutation AdjustThreadResponse($responseId: Int!, $data: AdjustThreadResponseInput!) {
   adjustThreadResponse(responseId: $responseId, data: $data) {

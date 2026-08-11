@@ -11,13 +11,17 @@ const redirectRoute = {
   [OnboardingStatus.WITH_SAMPLE_DATASET]: Path.Modeling,
 };
 
-export const useWithOnboarding = () => {
+export const useWithOnboarding = (options: { enabled?: boolean } = {}) => {
+  const enabled = options.enabled ?? true;
   const router = useRouter();
-  const { data, loading } = useOnboardingStatusQuery();
+  const { data, loading } = useOnboardingStatusQuery({
+    skip: !enabled,
+  });
 
   const onboardingStatus = data?.onboardingStatus?.status;
 
   useEffect(() => {
+    if (!enabled) return;
     if (onboardingStatus) {
       const newPath = redirectRoute[onboardingStatus];
       const pathname = router.pathname;
@@ -68,10 +72,10 @@ export const useWithOnboarding = () => {
         return;
       }
     }
-  }, [onboardingStatus, router.pathname]);
+  }, [enabled, onboardingStatus, router.pathname]);
 
   return {
-    loading,
+    loading: enabled ? loading : false,
     onboardingStatus,
   };
 };

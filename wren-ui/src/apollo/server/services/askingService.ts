@@ -140,6 +140,7 @@ export interface IAskingService {
    * Asking detail task.
    */
   createThread(input: AskingDetailTaskInput): Promise<Thread>;
+  getThread(threadId: number): Promise<Thread | null>;
   updateThread(
     threadId: number,
     input: Partial<AskingDetailTaskUpdateInput>,
@@ -490,6 +491,10 @@ export class AskingService implements IAskingService {
     this.askingTaskRepository = askingTaskRepository;
     this.mdlService = mdlService;
     this.askingTaskTracker = askingTaskTracker;
+  }
+
+  public async getThread(threadId: number): Promise<Thread | null> {
+    return this.threadRepository.findOneBy({ id: threadId });
   }
 
   public async getThreadRecommendationQuestions(

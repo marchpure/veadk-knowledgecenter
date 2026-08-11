@@ -11,6 +11,7 @@ const resolveAlias = {
 
 /** @type {import('next').NextConfig} */
 const nextConfig = withLess({
+  distDir: process.env.NEXT_DIST_DIR || '.next',
   output: 'standalone',
   staticPageGenerationTimeout: 1000,
   compiler: {

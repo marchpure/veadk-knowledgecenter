@@ -19,6 +19,8 @@ import {
   InstructionRepository,
   ApiHistoryRepository,
   DashboardItemRefreshJobRepository,
+  ThreadResponseShareRepository,
+  ApplicationResultShareRepository,
 } from '@server/repositories';
 import {
   WrenEngineAdaptor,
@@ -60,6 +62,10 @@ export const initComponents = () => {
   const deployLogRepository = new DeployLogRepository(knex);
   const threadRepository = new ThreadRepository(knex);
   const threadResponseRepository = new ThreadResponseRepository(knex);
+  const threadResponseShareRepository = new ThreadResponseShareRepository(knex);
+  const applicationResultShareRepository = new ApplicationResultShareRepository(
+    knex,
+  );
   const viewRepository = new ViewRepository(knex);
   const modelRepository = new ModelRepository(knex);
   const modelColumnRepository = new ModelColumnRepository(knex);
@@ -182,6 +188,8 @@ export const initComponents = () => {
     deployLogRepository,
     threadRepository,
     threadResponseRepository,
+    threadResponseShareRepository,
+    applicationResultShareRepository,
     viewRepository,
     modelRepository,
     modelColumnRepository,

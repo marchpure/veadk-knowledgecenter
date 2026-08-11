@@ -833,6 +833,16 @@ export const typeDefs = gql`
     responses: [ThreadResponse!]!
   }
 
+  type ThreadResponseShare {
+    token: String!
+    threadId: Int!
+    responseId: Int!
+    projectId: Int!
+    shareUrl: String!
+    createdAt: String
+    response: ThreadResponse!
+  }
+
   type SuggestedQuestion {
     question: String!
     label: String!
@@ -1134,6 +1144,7 @@ export const typeDefs = gql`
     threads: [Thread!]!
     thread(threadId: Int!): DetailedThread!
     threadResponse(responseId: Int!): ThreadResponse!
+    sharedThreadResponse(token: String!): ThreadResponseShare!
     nativeSql(responseId: Int!): String!
 
     # Adjustment
@@ -1239,6 +1250,7 @@ export const typeDefs = gql`
       where: ThreadResponseUniqueWhereInput!
       data: UpdateThreadResponseInput!
     ): ThreadResponse!
+    createThreadResponseShare(responseId: Int!): ThreadResponseShare!
     previewData(where: PreviewDataInput!): JSON!
     previewBreakdownData(where: PreviewDataInput!): JSON!
 

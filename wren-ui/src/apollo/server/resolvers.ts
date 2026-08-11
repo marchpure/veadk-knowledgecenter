@@ -45,6 +45,7 @@ const resolvers = {
     thread: askingResolver.getThread,
     threads: askingResolver.listThreads,
     threadResponse: askingResolver.getResponse,
+    sharedThreadResponse: askingResolver.getSharedThreadResponse,
     nativeSql: modelResolver.getNativeSql,
 
     // Views
@@ -119,6 +120,7 @@ const resolvers = {
     deleteThread: askingResolver.deleteThread,
     createThreadResponse: askingResolver.createThreadResponse,
     updateThreadResponse: askingResolver.updateThreadResponse,
+    createThreadResponseShare: askingResolver.createThreadResponseShare,
     previewData: askingResolver.previewData,
     previewBreakdownData: askingResolver.previewBreakdownData,
 
@@ -179,6 +181,7 @@ const resolvers = {
     deleteInstruction: instructionResolver.deleteInstruction,
   },
   ThreadResponse: askingResolver.getThreadResponseNestedResolver(),
+  ThreadResponseShare: askingResolver.getThreadResponseShareNestedResolver(),
   DetailStep: askingResolver.getDetailStepNestedResolver(),
   ResultCandidate: askingResolver.getResultCandidateNestedResolver(),
 

@@ -9,11 +9,15 @@ const { Content } = Layout;
 interface Props {
   children: React.ReactNode;
   loading?: boolean;
+  checkOnboarding?: boolean;
 }
 
 export default function SimpleLayout(props: Props) {
-  const { loading: fetching } = useWithOnboarding();
-  const { children, loading } = props;
+  const { children, loading, checkOnboarding = true } = props;
+  const { loading: onboardingLoading } = useWithOnboarding({
+    enabled: checkOnboarding,
+  });
+  const fetching = checkOnboarding ? onboardingLoading : false;
   const pageLoading = fetching || loading;
   return (
     <Layout

@@ -1,7 +1,10 @@
 export enum Path {
   Applications = '/applications',
+  ApplicationRun = '/applications/run',
+  ApplicationShare = '/applications/share',
   Home = '/home',
   HomeDashboard = '/home/dashboard',
+  HomeShare = '/home/share',
   Thread = '/home/[id]',
   Database = '/database',
   Workflow = '/workflow',

@@ -22,7 +22,7 @@ export const GlobalConfigProvider = ({ children }) => {
         return cleanup;
       })
       .catch((error) => {
-        console.error('Failed to get user config', error);
+        console.warn('Failed to get user config', error);
       });
   }, [router]);
 

@@ -68,7 +68,9 @@ const Card = styled.div<{ $interactive?: boolean; $dashed?: boolean }>`
   padding: 18px;
   border: 1px ${(props) => (props.$dashed ? 'dashed' : 'solid')}
     ${(props) =>
-      props.$dashed ? 'rgba(148, 163, 184, 0.62)' : 'rgba(226, 232, 240, 0.92)'};
+      props.$dashed
+        ? 'rgba(148, 163, 184, 0.62)'
+        : 'rgba(226, 232, 240, 0.92)'};
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.84);
   box-shadow: 0 8px 26px rgba(15, 23, 42, 0.05);
@@ -156,7 +158,7 @@ type LayoutProps = {
 };
 
 export function ConstructLayout({
-  activeKey,
+  activeKey: _activeKey,
   icon,
   title,
   description,
@@ -165,7 +167,7 @@ export function ConstructLayout({
   children,
 }: LayoutProps) {
   return (
-    <SimpleLayout loading={loading}>
+    <SimpleLayout loading={loading} checkOnboarding={false}>
       <Page>
         <Inner>
           <Header>

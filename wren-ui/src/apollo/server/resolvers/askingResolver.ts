@@ -7,6 +7,7 @@ import {
   ChartAdjustmentOption,
   AskFeedbackStatus,
 } from '@server/models/adaptor';
+import crypto from 'crypto';
 import { Thread } from '../repositories/threadRepository';
 import {
   DetailStep,
@@ -72,6 +73,15 @@ export interface DetailedThread {
   responses: ThreadResponse[];
 }
 
+export interface ThreadResponseShareResult {
+  token: string;
+  threadId: number;
+  responseId: number;
+  projectId: number;
+  shareUrl: string;
+  createdAt?: string;
+}
+
 export interface RecommendedQuestionsTask {
   questions: {
     question: string;
@@ -93,6 +103,9 @@ export class AskingResolver {
     this.updateThread = this.updateThread.bind(this);
     this.deleteThread = this.deleteThread.bind(this);
     this.listThreads = this.listThreads.bind(this);
+    this.createThreadResponseShare =
+      this.createThreadResponseShare.bind(this);
+    this.getSharedThreadResponse = this.getSharedThreadResponse.bind(this);
     this.createThreadResponse = this.createThreadResponse.bind(this);
     this.updateThreadResponse = this.updateThreadResponse.bind(this);
     this.getResponse = this.getResponse.bind(this);
@@ -627,6 +640,52 @@ export class AskingResolver {
     return response;
   }
 
+  public async createThreadResponseShare(
+    _root: any,
+    args: { responseId: number },
+    ctx: IContext,
+  ): Promise<ThreadResponseShareResult> {
+    const response = await ctx.askingService.getResponse(args.responseId);
+    if (!response) {
+      throw new Error(`Thread response ${args.responseId} not found`);
+    }
+
+    const thread = await ctx.askingService.getThread(response.threadId);
+    if (!thread) {
+      throw new Error(`Thread ${response.threadId} not found`);
+    }
+
+    const project = await ctx.projectService.getCurrentProject();
+    const share = await ctx.threadResponseShareRepository.upsertForResponse({
+      token: crypto.randomUUID().replace(/-/g, ''),
+      threadId: response.threadId,
+      responseId: response.id,
+      projectId: project.id,
+    });
+
+    return {
+      ...share,
+      shareUrl: `/home/share/${share.token}`,
+    };
+  }
+
+  public async getSharedThreadResponse(
+    _root: any,
+    args: { token: string },
+    ctx: IContext,
+  ): Promise<ThreadResponseShareResult> {
+    const share = await ctx.threadResponseShareRepository.findOneBy({
+      token: args.token,
+    });
+    if (!share) {
+      throw new Error('Shared answer not found');
+    }
+    return {
+      ...share,
+      shareUrl: `/home/share/${share.token}`,
+    };
+  }
+
   public async previewData(
     _root: any,
     args: { where: { responseId: number; stepIndex?: number; limit?: number } },
@@ -750,6 +809,20 @@ export class AskingResolver {
           ? safeFormatSQL(adjustmentTask.invalidSql)
           : null,
       };
+    },
+  });
+
+  public getThreadResponseShareNestedResolver = () => ({
+    response: async (
+      parent: ThreadResponseShareResult,
+      _args: any,
+      ctx: IContext,
+    ) => {
+      const response = await ctx.askingService.getResponse(parent.responseId);
+      if (!response) {
+        throw new Error(`Thread response ${parent.responseId} not found`);
+      }
+      return response;
     },
   });
 

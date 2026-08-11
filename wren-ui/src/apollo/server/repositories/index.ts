@@ -11,6 +11,8 @@ export * from './deployLogRepository';
 export * from './viewRepository';
 export * from './threadRepository';
 export * from './threadResponseRepository';
+export * from './threadResponseShareRepository';
+export * from './applicationResultShareRepository';
 export * from './schemaChangeRepository';
 export * from './dashboardRepository';
 export * from './dashboardItemRepository';

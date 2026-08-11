@@ -1,10 +1,16 @@
-import { useCallback, useEffect, useState } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useState,
+  type ReactNode,
+} from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/router';
 import {
   Alert,
   Button,
   Checkbox,
-  Drawer,
   Dropdown,
   Form,
   InputNumber,
@@ -16,22 +22,36 @@ import {
   Spin,
   Switch,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from 'antd';
 import AppstoreOutlined from '@ant-design/icons/AppstoreOutlined';
+import ApiOutlined from '@ant-design/icons/ApiOutlined';
+import BarChartOutlined from '@ant-design/icons/BarChartOutlined';
+import CodeOutlined from '@ant-design/icons/CodeOutlined';
+import DatabaseOutlined from '@ant-design/icons/DatabaseOutlined';
 import DeleteOutlined from '@ant-design/icons/DeleteOutlined';
+import DeploymentUnitOutlined from '@ant-design/icons/DeploymentUnitOutlined';
 import EditOutlined from '@ant-design/icons/EditOutlined';
 import EllipsisOutlined from '@ant-design/icons/EllipsisOutlined';
+import FileExcelOutlined from '@ant-design/icons/FileExcelOutlined';
+import FileOutlined from '@ant-design/icons/FileOutlined';
 import ForkOutlined from '@ant-design/icons/ForkOutlined';
+import GlobalOutlined from '@ant-design/icons/GlobalOutlined';
 import LeftOutlined from '@ant-design/icons/LeftOutlined';
+import PictureOutlined from '@ant-design/icons/PictureOutlined';
 import PlusOutlined from '@ant-design/icons/PlusOutlined';
+import ReadOutlined from '@ant-design/icons/ReadOutlined';
 import RocketOutlined from '@ant-design/icons/RocketOutlined';
 import SearchOutlined from '@ant-design/icons/SearchOutlined';
 import SendOutlined from '@ant-design/icons/SendOutlined';
 import ShareAltOutlined from '@ant-design/icons/ShareAltOutlined';
 import StopOutlined from '@ant-design/icons/StopOutlined';
+import ToolOutlined from '@ant-design/icons/ToolOutlined';
 import styled from 'styled-components';
+import ReactFlow, { Background, Controls } from 'reactflow';
+import 'reactflow/dist/style.css';
 import {
   ConstructEmpty,
   ConstructLayout,
@@ -46,7 +66,7 @@ import {
   DbgptAppParamNeed,
   DbgptAppResource,
   DbgptConfigurableParam,
-  DbgptDialogue,
+  ConnectorInstance,
   DbgptFlow,
   DbgptNativeScene,
   DbgptPrompt,
@@ -55,7 +75,21 @@ import {
   DbgptStrategy,
   DbgptTeamMode,
   fetchDbgpt,
+  mapFlowDataToReactFlow,
+  normalizeConnector,
 } from '@/lib/dbgpt';
+import {
+  createAppDialogue,
+  getApiInvocationEndpoint,
+  getAppActionHint,
+  getAppChatMode,
+  getAppCompleteness,
+  getAppRuntimeReady,
+  getAppResourceCount,
+  getAppRuntimeContract,
+  getDialogueCreationEndpoint,
+  getRecommendQuestions,
+} from '@/lib/dbgptRuntime';
 import { Path } from '@/utils/enum';
 
 const { Paragraph, Text, Title } = Typography;
@@ -63,6 +97,14 @@ const PAGE_SIZE = 12;
 
 type TabKey = 'all' | 'published' | 'unpublished';
 type AppModalMode = 'create' | 'edit';
+type ResourcePublishKind = 'database' | 'knowledge' | 'tool';
+type RuntimeStatusTone = 'default' | 'success' | 'error';
+
+type RuntimeStatus = {
+  label: string;
+  detail?: string;
+  tone: RuntimeStatusTone;
+};
 
 type AppFormValues = {
   app_name: string;
@@ -72,15 +114,7 @@ type AppFormValues = {
 
 type ConfigureFormValues = {
   agent_names?: string[];
-  agent_details?: Record<
-    string,
-    {
-      llm_strategy?: string;
-      llm_strategy_value?: string[];
-      prompt_template?: string;
-      resources?: DbgptAppResource[];
-    }
-  >;
+  agent_details?: Record<string, AgentDetailFormValue>;
   flow_name?: string;
   chat_scene?: string;
   bind_value?: string;
@@ -91,16 +125,11 @@ type ConfigureFormValues = {
   recommend_questions?: Array<{ question?: string; valid?: boolean }>;
 };
 
-type RuntimeMessage = {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-};
-
-type ChatSessionState = {
-  app: DbgptApp;
-  convUid: string;
-  chatMode: string;
+type AgentDetailFormValue = {
+  llm_strategy?: string;
+  llm_strategy_value?: string[];
+  prompt_template?: string;
+  resources?: DbgptAppResource[];
 };
 
 type CatalogState = {
@@ -112,6 +141,7 @@ type CatalogState = {
   prompts: DbgptPrompt[];
   models: string[];
   flows: DbgptFlow[];
+  connectors: ConnectorInstance[];
 };
 
 const emptyCatalog: CatalogState = {
@@ -123,7 +153,27 @@ const emptyCatalog: CatalogState = {
   prompts: [],
   models: [],
   flows: [],
+  connectors: [],
 };
+
+const getErrorMessage = (err: unknown, fallback: string) =>
+  err instanceof Error ? err.message : fallback;
+
+async function loadCatalogSection<T>(
+  label: string,
+  request: Promise<T>,
+  fallback: T,
+) {
+  try {
+    return { label, data: await request, error: '' };
+  } catch (err) {
+    return {
+      label,
+      data: fallback,
+      error: `${label}: ${getErrorMessage(err, 'request failed')}`,
+    };
+  }
+}
 
 const tabOptions: Array<{ label: string; value: TabKey }> = [
   { label: 'All', value: 'all' },
@@ -210,6 +260,7 @@ const FooterActions = styled.div`
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 `;
 
 const ModeGrid = styled.div`
@@ -281,23 +332,43 @@ const ModeDescription = styled.div`
   line-height: 1.45;
 `;
 
-const DrawerSection = styled.section`
-  padding: 16px 0;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.92);
+const ModalCreateLayout = styled.div`
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(260px, 0.9fr);
+  gap: 24px;
 
-  &:last-child {
-    border-bottom: none;
+  @media (max-width: 820px) {
+    grid-template-columns: 1fr;
   }
 `;
 
-const DetailGrid = styled.div`
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+const ModeExplainer = styled.aside`
+  padding: 18px;
+  border-left: 1px solid rgba(226, 232, 240, 0.94);
+  background: #f8fafc;
+
+  @media (max-width: 820px) {
+    border-left: 0;
+    border-top: 1px solid rgba(226, 232, 240, 0.94);
+  }
 `;
 
-const DetailItem = styled.div`
-  min-width: 0;
+const ModeExplainerHeader = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+`;
+
+const ModeExplainerIcon = styled.span`
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 auto;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid rgba(226, 232, 240, 0.94);
 `;
 
 const DetailLabel = styled.div`
@@ -335,14 +406,55 @@ const ConfigureTitle = styled.div`
 `;
 
 const ConfigureContent = styled.div`
+  max-width: 1320px;
+  margin: 0 auto;
+  padding-top: 18px;
+`;
+
+const BuilderGrid = styled.div`
   display: grid;
   grid-template-columns: minmax(0, 1fr) 360px;
-  gap: 18px;
-  padding-top: 18px;
+  gap: 16px;
+  align-items: start;
 
-  @media (max-width: 1180px) {
+  @media (max-width: 1120px) {
     grid-template-columns: 1fr;
   }
+`;
+
+const BuilderMain = styled.div`
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 16px;
+`;
+
+const BuilderAside = styled.aside`
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
+  position: sticky;
+  top: 72px;
+
+  @media (max-width: 1120px) {
+    position: static;
+  }
+`;
+
+const BuilderIntro = styled.div`
+  padding: 16px 18px;
+  border: 1px solid rgba(226, 232, 240, 0.94);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 26px rgba(15, 23, 42, 0.05);
+`;
+
+const BuilderIntroHeader = styled.div`
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
 `;
 
 const Panel = styled.div`
@@ -368,8 +480,10 @@ const AgentGrid = styled.div`
 `;
 
 const AgentOption = styled.div<{ $selected?: boolean }>`
-  min-height: 86px;
-  padding: 12px;
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 8px 10px;
   border: 1px solid
     ${(props) =>
       props.$selected
@@ -379,6 +493,7 @@ const AgentOption = styled.div<{ $selected?: boolean }>`
   background: ${(props) =>
     props.$selected ? 'rgba(40, 103, 245, 0.06)' : '#fff'};
   cursor: pointer;
+  user-select: none;
   transition:
     border-color 0.18s ease,
     background 0.18s ease,
@@ -390,18 +505,19 @@ const AgentOption = styled.div<{ $selected?: boolean }>`
   }
 `;
 
-const AgentCheck = styled.span<{ $selected?: boolean }>`
-  display: inline-grid;
+const OptionCheck = styled.span<{ $selected?: boolean; $single?: boolean }>`
+  display: grid;
   place-items: center;
+  flex: 0 0 auto;
   width: 16px;
   height: 16px;
-  margin-right: 8px;
+  margin: 2px 10px 0 0;
   border: 1px solid
     ${(props) =>
       props.$selected
         ? 'rgba(40, 103, 245, 0.92)'
         : 'rgba(148, 163, 184, 0.9)'};
-  border-radius: ${(props) => (props.$selected ? '50%' : '4px')};
+  border-radius: ${(props) => (props.$single ? '50%' : '4px')};
   background: ${(props) => (props.$selected ? '#2867f5' : '#fff')};
 
   &::after {
@@ -409,7 +525,7 @@ const AgentCheck = styled.span<{ $selected?: boolean }>`
     display: ${(props) => (props.$selected ? 'block' : 'none')};
     width: 6px;
     height: 6px;
-    border-radius: 50%;
+    border-radius: ${(props) => (props.$single ? '50%' : '2px')};
     background: #fff;
   }
 `;
@@ -434,59 +550,124 @@ const ResourceRow = styled.div`
   }
 `;
 
-const RunPanel = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-`;
-
-const ChatSession = styled.div`
-  display: flex;
-  flex-direction: column;
-  min-height: 420px;
+const AgentConfigShell = styled.div`
+  display: grid;
+  grid-template-columns: 192px minmax(0, 1fr);
+  min-height: 430px;
   border: 1px solid rgba(226, 232, 240, 0.94);
   border-radius: 8px;
   background: #fff;
+  overflow: hidden;
+
+  @media (max-width: 920px) {
+    grid-template-columns: 1fr;
+  }
 `;
 
-const ChatSessionMessages = styled.div`
-  flex: 1;
-  max-height: 520px;
-  min-height: 260px;
-  padding: 14px;
-  overflow: auto;
+const AgentTabs = styled.div`
+  padding: 10px;
+  border-right: 1px solid rgba(226, 232, 240, 0.94);
   background: #f8fafc;
+
+  @media (max-width: 920px) {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    border-right: none;
+    border-bottom: 1px solid rgba(226, 232, 240, 0.94);
+  }
 `;
 
-const ChatSessionMessage = styled.div<{ $role: RuntimeMessage['role'] }>`
+const AgentTab = styled.button<{ $active?: boolean }>`
   display: flex;
-  justify-content: ${(props) =>
-    props.$role === 'user' ? 'flex-end' : 'flex-start'};
-  margin-bottom: 10px;
-`;
-
-const ChatSessionBubble = styled.div<{ $role: RuntimeMessage['role'] }>`
-  max-width: 88%;
-  padding: 10px 12px;
-  border: 1px solid
-    ${(props) =>
-      props.$role === 'user'
-        ? 'rgba(40, 103, 245, 0.26)'
-        : 'rgba(226, 232, 240, 0.96)'};
+  align-items: center;
+  width: 100%;
+  min-height: 38px;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 0;
   border-radius: 8px;
   background: ${(props) =>
-    props.$role === 'user' ? 'rgba(40, 103, 245, 0.08)' : '#fff'};
-  color: #111827;
-  font-size: 13px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
+    props.$active ? 'rgba(40, 103, 245, 0.09)' : 'transparent'};
+  color: ${(props) => (props.$active ? '#2867f5' : '#334155')};
+  text-align: left;
+  cursor: pointer;
+
+  &:hover {
+    background: rgba(40, 103, 245, 0.07);
+  }
+
+  @media (max-width: 920px) {
+    width: auto;
+    min-width: 150px;
+  }
 `;
 
-const ChatSessionComposer = styled.div`
-  padding: 12px;
-  border-top: 1px solid rgba(226, 232, 240, 0.94);
+const AgentDetailPanel = styled.div`
+  min-width: 0;
+  padding: 18px;
+`;
+
+const ResourceWorkspace = styled.div`
+  display: grid;
+  grid-template-columns: 182px minmax(0, 1fr);
+  min-height: 390px;
+  border: 1px solid rgba(226, 232, 240, 0.94);
+  border-radius: 8px;
   background: #fff;
+  overflow: hidden;
+
+  @media (max-width: 920px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const ResourceSidebar = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  border-right: 1px solid rgba(226, 232, 240, 0.94);
+  background: #f8fafc;
+
+  @media (max-width: 920px) {
+    border-right: none;
+    border-bottom: 1px solid rgba(226, 232, 240, 0.94);
+  }
+`;
+
+const ResourceList = styled.div`
+  display: flex;
+  flex: 1;
+  min-height: 220px;
+  flex-direction: column;
+  gap: 4px;
+  overflow: auto;
+`;
+
+const ResourceTab = styled.button<{ $active?: boolean }>`
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 36px;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 8px;
+  background: ${(props) =>
+    props.$active ? 'rgba(40, 103, 245, 0.09)' : 'transparent'};
+  color: ${(props) => (props.$active ? '#2867f5' : '#334155')};
+  text-align: left;
+  cursor: pointer;
+
+  &:hover {
+    background: rgba(40, 103, 245, 0.07);
+  }
+`;
+
+const ResourcePanel = styled.div`
+  min-width: 0;
+  padding: 16px;
 `;
 
 const ConfigSummary = styled.div`
@@ -502,63 +683,314 @@ const ConfigSummaryItem = styled.div`
   background: #fff;
 `;
 
-const ChatWorkspace = styled.div`
+const InvocationGrid = styled.div`
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
-  gap: 18px;
+  grid-template-columns: 1fr;
+  gap: 10px;
+`;
 
-  @media (max-width: 1120px) {
-    grid-template-columns: 1fr;
+const FieldList = styled.div`
+  display: grid;
+  grid-template-columns: minmax(110px, 0.36fr) minmax(0, 1fr);
+  gap: 8px 12px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(226, 232, 240, 0.94);
+  border-radius: 8px;
+  background: #f8fafc;
+`;
+
+const StepRail = styled.div`
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+
+  @media (max-width: 920px) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 `;
 
-const ChatMain = styled.div`
-  min-height: calc(100vh - 190px);
+const StepItem = styled.div<{ $done?: boolean; $active?: boolean }>`
+  padding: 12px;
+  border: 1px solid
+    ${(props) =>
+      props.$active
+        ? 'rgba(40, 103, 245, 0.52)'
+        : props.$done
+          ? 'rgba(34, 197, 94, 0.38)'
+          : 'rgba(226, 232, 240, 0.94)'};
+  border-radius: 8px;
+  background: ${(props) =>
+    props.$active
+      ? 'rgba(40, 103, 245, 0.06)'
+      : props.$done
+        ? 'rgba(34, 197, 94, 0.06)'
+        : '#fff'};
+`;
+
+const FlowPreviewFrame = styled.div`
+  height: 420px;
+  margin-top: 14px;
+  overflow: hidden;
+  border: 1px solid rgba(226, 232, 240, 0.94);
+  border-radius: 8px;
+  background: #f8fafc;
+`;
+
+const NativeSceneGrid = styled.div`
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+`;
+
+const NativeSceneCard = styled.button<{ $selected?: boolean }>`
+  display: flex;
+  align-items: flex-start;
+  min-height: 92px;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid
+    ${(props) =>
+      props.$selected
+        ? 'rgba(40, 103, 245, 0.70)'
+        : 'rgba(226, 232, 240, 0.96)'};
+  border-radius: 8px;
+  background: ${(props) =>
+    props.$selected ? 'rgba(40, 103, 245, 0.06)' : '#fff'};
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease;
+
+  &:hover {
+    border-color: rgba(40, 103, 245, 0.58);
+    box-shadow: 0 8px 22px rgba(15, 23, 42, 0.07);
+  }
+`;
+
+const ResourceIcon = styled.span`
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  color: #2867f5;
+`;
+
+const LifecyclePanel = styled.div`
+  padding: 14px;
   border: 1px solid rgba(226, 232, 240, 0.94);
   border-radius: 8px;
   background: #fff;
   box-shadow: 0 8px 26px rgba(15, 23, 42, 0.05);
-  overflow: hidden;
 `;
 
-const ChatHeader = styled.div`
-  display: flex;
+const LifecycleList = styled.div`
+  display: grid;
+  gap: 10px;
+`;
+
+const LifecycleItem = styled.div<{ $done?: boolean; $active?: boolean }>`
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  padding: 9px;
+  border: 1px solid
+    ${(props) =>
+      props.$active
+        ? 'rgba(40, 103, 245, 0.52)'
+        : props.$done
+          ? 'rgba(34, 197, 94, 0.38)'
+          : 'rgba(226, 232, 240, 0.94)'};
+  border-radius: 8px;
+  background: ${(props) =>
+    props.$active
+      ? 'rgba(40, 103, 245, 0.06)'
+      : props.$done
+        ? 'rgba(34, 197, 94, 0.06)'
+        : '#fff'};
+`;
+
+const LifecycleDot = styled.span<{ $done?: boolean; $active?: boolean }>`
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  border-radius: 50%;
+  color: #fff;
+  background: ${(props) =>
+    props.$done ? '#22c55e' : props.$active ? '#2867f5' : '#94a3b8'};
+  font-size: 12px;
+  font-weight: 700;
+`;
+
+const ResourceSummaryList = styled.div`
+  display: grid;
+  gap: 8px;
+`;
+
+const RouteSummaryList = styled.div`
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+`;
+
+const ResourceSummaryItem = styled.div`
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
   align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 16px 18px;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.94);
-`;
-
-const ChatBody = styled.div`
-  height: calc(100vh - 352px);
-  min-height: 360px;
-  padding: 18px;
-  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid rgba(226, 232, 240, 0.94);
+  border-radius: 8px;
   background: #f8fafc;
 `;
 
-const ChatComposer = styled.div`
-  padding: 14px 18px 18px;
-  border-top: 1px solid rgba(226, 232, 240, 0.94);
-  background: #fff;
-`;
-
-const ChatSide = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-`;
-
-const ChatEmptyState = styled.div`
+const ResourcePublishGrid = styled.div`
   display: grid;
-  place-items: center;
-  min-height: 260px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+
+  @media (max-width: 920px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
+const ResourcePublishCard = styled.button<{ $selected?: boolean }>`
+  min-height: 104px;
+  padding: 12px;
+  border: 1px solid
+    ${(props) =>
+      props.$selected
+        ? 'rgba(40, 103, 245, 0.70)'
+        : 'rgba(226, 232, 240, 0.96)'};
+  border-radius: 8px;
+  background: ${(props) =>
+    props.$selected ? 'rgba(40, 103, 245, 0.06)' : '#fff'};
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background 0.18s ease;
+
+  &:hover {
+    border-color: rgba(40, 103, 245, 0.58);
+    box-shadow: 0 8px 22px rgba(15, 23, 42, 0.07);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    background: #f8fafc;
+    color: #94a3b8;
+    box-shadow: none;
+  }
+`;
+
+const ResourcePickerShell = styled.div`
+  display: grid;
+  gap: 12px;
+`;
+
+const BoundResourceGrid = styled.div`
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+`;
+
+const CardSection = styled.div`
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+`;
+
+const MiniResourceList = styled.div`
+  display: grid;
+  gap: 6px;
+`;
+
+const MiniResourceItem = styled.div`
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid rgba(226, 232, 240, 0.92);
+  border-radius: 8px;
+  background: #f8fafc;
+`;
+
+const RuntimeLine = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
   color: #64748b;
-  text-align: center;
+  font-size: 12px;
+
+  .ant-typography {
+    font-size: 12px;
+  }
+`;
+
+const QuestionChips = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+`;
+
+const EntryHint = styled.div`
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid rgba(226, 232, 240, 0.94);
 `;
 
 const isPublished = (app: DbgptApp) => String(app.published) === 'true';
+
+const agentIconMap: Record<string, ReactNode> = {
+  DataScientist: <BarChartOutlined />,
+  ToolExpert: <ToolOutlined />,
+  CodeEngineer: <CodeOutlined />,
+};
+
+const resourceIconMap: Record<string, ReactNode> = {
+  all: <AppstoreOutlined />,
+  app: <AppstoreOutlined />,
+  database: <DatabaseOutlined />,
+  knowledge: <ReadOutlined />,
+  internet: <GlobalOutlined />,
+  plugin: <AppstoreOutlined />,
+  skill: <CodeOutlined />,
+  tool: <ToolOutlined />,
+  'tool(autogpt_plugins)': <ToolOutlined />,
+  'tool(mcp(sse))': <ApiOutlined />,
+  text_file: <FileOutlined />,
+  excel_file: <FileExcelOutlined />,
+  image_file: <PictureOutlined />,
+  awel_flow: <DeploymentUnitOutlined />,
+};
+
+const getAgentIcon = (name?: string) =>
+  name ? agentIconMap[name] || <ForkOutlined /> : <ForkOutlined />;
+
+const getResourceIcon = (type?: string) =>
+  type ? resourceIconMap[type] || <AppstoreOutlined /> : <AppstoreOutlined />;
+
+const getAppIcon = (mode?: string) => {
+  if (mode === 'native_app') return <AppstoreOutlined />;
+  if (mode === 'awel_layout') return <DeploymentUnitOutlined />;
+  if (mode === 'auto_plan') return <ForkOutlined />;
+  if (mode === 'single_agent') return <ToolOutlined />;
+  return <AppstoreOutlined />;
+};
 
 const getChatScene = (app: DbgptApp) => {
   const scene = app.team_context?.chat_scene;
@@ -592,64 +1024,221 @@ const getModeDescription = (
   );
 };
 
-const getAppChatMode = (app: DbgptApp) =>
-  app.team_mode === 'native_app' ? getChatScene(app) : 'chat_agent';
+const getModeConfigurationTarget = (mode?: string) => {
+  if (mode === 'awel_layout') return 'Workflow assembly';
+  if (mode === 'single_agent') return 'Single resource app';
+  if (mode === 'auto_plan') return 'Composite resource app';
+  if (mode === 'native_app') return 'Native DB-GPT template';
+  return 'Resource publication';
+};
 
-const getAppSelectParam = (app: DbgptApp) => {
-  if (app.team_mode !== 'native_app') return app.app_code;
-  const resource = app.param_need?.find((item) => item.type === 'resource');
-  if (typeof resource?.bind_value === 'string' && resource.bind_value) {
-    return resource.bind_value;
+const resourcePublishLabels: Record<ResourcePublishKind, string> = {
+  database: 'Database data product',
+  knowledge: 'Knowledge space',
+  tool: 'Tool connector',
+};
+
+const primaryResourceTypes = new Set(['database', 'knowledge', 'tool']);
+
+const toolResourceTypes = ['tool(mcp(sse))', 'tool', 'tool(autogpt_plugins)'];
+
+const getPublishResourceType = (resource?: DbgptAppResource) => {
+  if (!resource?.type) return undefined;
+  if (resource.type === 'database') return 'database';
+  if (resource.type === 'knowledge') return 'knowledge';
+  if (resource.type === 'tool' || resource.type.startsWith('tool(')) {
+    return 'tool';
   }
-  return '';
+  return undefined;
 };
 
-const getAppModel = (app: DbgptApp) => {
-  const model = app.param_need?.find((item) => item.type === 'model')?.value;
-  return typeof model === 'string' && model ? model : undefined;
+const getAvailablePublishKinds = (resourceTypes: string[]) => {
+  const kinds: ResourcePublishKind[] = [];
+  if (resourceTypes.includes('database')) kinds.push('database');
+  if (resourceTypes.includes('knowledge')) kinds.push('knowledge');
+  if (resourceTypes.some((type) => type === 'tool' || type.startsWith('tool('))) {
+    kinds.push('tool');
+  }
+  return kinds;
 };
 
-const createAppDialogue = async (app: DbgptApp) => {
-  const chatMode = getAppChatMode(app);
-  const dialogue = await fetchDbgpt<DbgptDialogue>(
-    `/api/v1/chat/dialogue/new?chat_mode=${encodeURIComponent(chatMode)}`,
-    {
-      method: 'POST',
-      body: JSON.stringify({ chat_mode: chatMode }),
-    },
+const getBestResourceTypeForKind = (
+  kind: ResourcePublishKind,
+  resourceTypes: string[],
+) => {
+  if (kind === 'tool') {
+    return toolResourceTypes.find((type) => resourceTypes.includes(type));
+  }
+  return resourceTypes.includes(kind) ? kind : undefined;
+};
+
+const getPrimaryResourceSelectionField = (type?: string) => {
+  if (type === 'database') return 'db_name';
+  if (type === 'knowledge') return 'space_name';
+  if (type === 'tool') return 'name';
+  if (type === 'tool(autogpt_plugins)') return 'tool_name';
+  if (type === 'tool(mcp(sse))') return 'mcp_servers';
+  return undefined;
+};
+
+const getResourceOptionField = (
+  params?: DbgptConfigurableParam[],
+  type?: string,
+) => {
+  const preferred = getPrimaryResourceSelectionField(type);
+  const preferredParam = preferred
+    ? params?.find((param) => param.param_name === preferred)
+    : undefined;
+  if (preferredParam?.valid_values) return preferredParam.param_name;
+  const optionParam = params?.find(
+    (param) =>
+      Array.isArray(param.valid_values) && param.valid_values.length > 0,
   );
+  return optionParam?.param_name || preferred;
+};
+
+const buildResourceConfigFromSelection = ({
+  type,
+  label,
+  key,
+  params,
+  connector,
+}: {
+  type: string;
+  label?: string;
+  key?: string;
+  params?: DbgptConfigurableParam[];
+  connector?: ConnectorInstance;
+}) => {
+  const config = buildResourceConfigWithFallbacks(params, label || key);
+  const field = getResourceOptionField(params, type);
+  if (field && key) config[field] = key;
+  if (field === 'mcp_servers' && connector?.config?.server_uri) {
+    config.mcp_servers = connector.config.server_uri;
+  }
+  if (type === 'tool(mcp(sse))' && connector) {
+    config.connector_id = connector.id;
+    config.connector_type = connector.connector_type;
+    config.name = connector.display_name || label || key || 'Tool connector';
+    if (connector.config?.auth_type) config.auth_type = connector.config.auth_type;
+    if (connector.config?.transport) config.transport = connector.config.transport;
+  }
+  if (!config.name) config.name = label || key || 'Resource';
+  return config;
+};
+
+const buildBoundResource = ({
+  type,
+  label,
+  key,
+  params,
+  connector,
+}: {
+  type: string;
+  label?: string;
+  key?: string;
+  params?: DbgptConfigurableParam[];
+  connector?: ConnectorInstance;
+}): DbgptAppResource => {
+  const config = buildResourceConfigFromSelection({
+    type,
+    label,
+    key,
+    params,
+    connector,
+  });
   return {
-    convUid: dialogue.conv_uid,
-    chatMode: dialogue.chat_mode || chatMode,
+    name: getResourceDisplayName(type, config, label || key),
+    type,
+    value: JSON.stringify(config),
+    is_dynamic: false,
+    context: connector
+      ? {
+          connector_id: connector.id,
+          connector_type: connector.connector_type,
+          status: connector.status,
+        }
+      : null,
+    version: 'v2',
   };
 };
 
-const buildChatBody = (app: DbgptApp, convUid: string, input: string) => ({
-  conv_uid: convUid,
-  app_code: app.app_code,
-  chat_mode: getAppChatMode(app),
-  user_input: input,
-  model_name: getAppModel(app),
-  select_param: getAppSelectParam(app),
-  temperature:
-    app.param_need?.find((item) => item.type === 'temperature')?.value ||
-    undefined,
-  max_new_tokens:
-    app.param_need?.find((item) => item.type === 'max_new_tokens')?.value ||
-    undefined,
-});
+const getAppConfigurationGaps = (app: DbgptApp) => {
+  const gaps: string[] = [];
+  if (!app.app_name) gaps.push('Add application name.');
+  if (!app.team_mode) gaps.push('Choose a work mode.');
 
-const sendAppChat = async (app: DbgptApp, convUid: string, input: string) => {
-  const response = await fetch('/api/dbgpt/api/v1/chat/completions', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(buildChatBody(app, convUid, input)),
-  });
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(errorText || `Chat failed with HTTP ${response.status}`);
+  if (['single_agent', 'auto_plan'].includes(app.team_mode || '')) {
+    const selectedAgents = (app.details || []).filter(
+      (detail) => detail.agent_name,
+    );
+    if (!selectedAgents.length) {
+      gaps.push('Select at least one agent.');
+    } else if (
+      app.team_mode === 'single_agent' &&
+      selectedAgents.length !== 1
+    ) {
+      gaps.push('Single Agent mode must use exactly one agent.');
+    }
+    if (
+      selectedAgents.some(
+        (detail) =>
+          !(detail.resources || []).length && !detail.prompt_template?.trim(),
+      )
+    ) {
+      gaps.push(
+        'Bind at least one resource or prompt for every selected agent.',
+      );
+    }
   }
-  return readStreamResponse(response);
+
+  if (app.team_mode === 'awel_layout' && !getAppCompleteness(app)) {
+    gaps.push('Choose an AWEL workflow.');
+  }
+
+  if (app.team_mode === 'native_app' && !getAppCompleteness(app)) {
+    gaps.push('Choose a native app template and bind the required resource.');
+  }
+
+  if (!isPublished(app)) gaps.push('Publish the application.');
+  return gaps;
+};
+
+const getBlockingGaps = (app: DbgptApp) =>
+  getAppConfigurationGaps(app).filter(
+    (gap) => gap !== 'Publish the application.',
+  );
+
+const canPublishApp = (app: DbgptApp) => getBlockingGaps(app).length === 0;
+
+const getWorkModeConfigLabel = (app: DbgptApp) => {
+  if (['single_agent', 'auto_plan'].includes(app.team_mode || '')) {
+    const agentCount = app.details?.length || 0;
+    const resourceCount = getAppResourceCount(app);
+    if (!agentCount) return 'No agent selected';
+    if (!resourceCount) return 'Agent selected, no bound resources';
+    return `${agentCount} agent${agentCount > 1 ? 's' : ''}, ${resourceCount} resource${resourceCount > 1 ? 's' : ''}`;
+  }
+  if (app.team_mode === 'awel_layout') {
+    return getAppCompleteness(app)
+      ? (app.team_context?.label as string) ||
+          (app.team_context?.name as string) ||
+          'Workflow selected'
+      : 'No workflow selected';
+  }
+  if (app.team_mode === 'native_app') {
+    return getAppCompleteness(app)
+      ? `${getChatScene(app)} configured`
+      : 'Native scene or resource missing';
+  }
+  return 'Mode not configured';
+};
+
+const getActionTagColor = (app: DbgptApp) => {
+  const hint = getAppActionHint(app);
+  if (hint === 'Ready') return 'green';
+  if (hint === 'No resources') return 'gold';
+  return 'orange';
 };
 
 const getBrowserOrigin = () =>
@@ -657,9 +1246,7 @@ const getBrowserOrigin = () =>
 
 const getApplicationShareUrl = (app: DbgptApp) => {
   const origin = getBrowserOrigin();
-  return `${origin}${Path.Applications}?mode=chat&app_code=${encodeURIComponent(
-    app.app_code,
-  )}`;
+  return `${origin}${Path.ApplicationRun}/${encodeURIComponent(app.app_code)}`;
 };
 
 const getDingTalkShareUrl = (app: DbgptApp) => {
@@ -696,99 +1283,13 @@ const clearApplicationUrlState = () => {
   window.history.replaceState(null, '', url.toString());
 };
 
-const getAppConfigurationSummary = (
-  app: DbgptApp,
-  teamModes: DbgptTeamMode[],
-) => {
-  if (['single_agent', 'auto_plan'].includes(app.team_mode || '')) {
-    const agents = (app.details || [])
-      .map((detail) => detail.agent_name)
-      .filter(Boolean);
-    return [
-      {
-        label: app.team_mode === 'single_agent' ? 'Agent' : 'Agents',
-        value: agents.length ? agents.join(', ') : 'No agent selected',
-      },
-      {
-        label: 'Resources',
-        value:
-          (app.details || [])
-            .flatMap((detail) => detail.resources || [])
-            .map((resource) => resource.name || resource.type)
-            .filter(Boolean)
-            .join(', ') || 'No resources bound',
-      },
-    ];
-  }
-
-  if (app.team_mode === 'awel_layout') {
-    return [
-      {
-        label: 'Workflow',
-        value:
-          (app.team_context?.label as string) ||
-          (app.team_context?.name as string) ||
-          'No workflow selected',
-      },
-    ];
-  }
-
-  if (app.team_mode === 'native_app') {
-    const resource = app.param_need?.find((item) => item.type === 'resource');
-    return [
-      { label: 'Native scene', value: getChatScene(app) },
-      {
-        label: 'Resource',
-        value:
-          resource?.value === 'excel_file'
-            ? 'Selected at chat time'
-            : resource?.bind_value || 'No resource bound',
-      },
-      { label: 'Model', value: getAppModel(app) || 'Default model' },
-    ];
-  }
-
-  return [
-    {
-      label: 'Mode',
-      value: getModeLabel(app.team_mode, teamModes),
-    },
-  ];
-};
-
-const getRecommendQuestions = (app: DbgptApp) => {
-  return (app.recommend_questions || []).map((item) => ({
-    question: typeof item.question === 'string' ? item.question : '',
-    valid: Boolean(item.valid),
-  }));
-};
-
-const getAppCompleteness = (app: DbgptApp) => {
-  if (['single_agent', 'auto_plan'].includes(app.team_mode || '')) {
-    return Boolean(app.details?.length);
-  }
-  if (app.team_mode === 'awel_layout') {
-    return Boolean(app.team_context?.name || app.team_context?.uid);
-  }
-  if (app.team_mode === 'native_app') {
-    const resource = app.param_need?.find((item) => item.type === 'resource');
-    const scene = app.team_context?.chat_scene;
-    if (!scene) return false;
-    if (!resource?.value) return true;
-    if (resource.value === 'excel_file') return true;
-    return Boolean(resource.bind_value);
-  }
-  return false;
-};
-
-const getAppActionHint = (app: DbgptApp) => {
-  if (getAppCompleteness(app)) return 'Ready';
-  if (['single_agent', 'auto_plan'].includes(app.team_mode || '')) {
-    return 'Select agent';
-  }
-  if (app.team_mode === 'awel_layout') return 'Select workflow';
-  if (app.team_mode === 'native_app') return 'Bind resource';
-  return 'Configure';
+const setApplicationConfigureUrlState = (appCode: string) => {
+  if (typeof window === 'undefined') return;
+  const url = new URL(window.location.href);
+  url.pathname = Path.Applications;
+  url.searchParams.set('mode', 'configure');
+  url.searchParams.set('app_code', appCode);
+  window.history.replaceState(null, '', url.toString());
 };
 
 const normalizeResources = (resources?: DbgptAppResource[]) => {
@@ -799,139 +1300,202 @@ const normalizeResources = (resources?: DbgptAppResource[]) => {
       type: resource.type,
       value: resource.is_dynamic ? '' : resource.value || '',
       is_dynamic: Boolean(resource.is_dynamic),
+      context: resource.context ?? null,
+      version: resource.version || 'v2',
     }));
 };
 
-const extractFenceBlocks = (value: string, fenceName: string) => {
-  const blocks: string[] = [];
-  const pattern = new RegExp(
-    `\`\`\`${fenceName}\\s*\\n([\\s\\S]*?)\\n\`\`\``,
-    'g',
+const getOptionLabel = (
+  options: DbgptResourceOption[] | undefined,
+  value: unknown,
+) => {
+  if (typeof value !== 'string' || !value) return undefined;
+  const option = options?.find((item) => item.key === value);
+  return option?.label || value;
+};
+
+const getResourceValueLabel = (resource?: DbgptAppResource) => {
+  if (!resource) return '';
+  if (resource.is_dynamic) return 'Selected at runtime';
+  const config = parseResourceValue(resource.value);
+  return (
+    getResourceDisplayName(resource.type, config, resource.name) ||
+    resource.value ||
+    ''
   );
-  let matched: RegExpExecArray | null;
-  while ((matched = pattern.exec(value)) !== null) {
-    blocks.push(matched[1]);
+};
+
+const getResourcePrimaryValue = (resource?: DbgptAppResource) => {
+  const config = parseResourceValue(resource?.value);
+  return (
+    config.db_name ||
+    config.space_name ||
+    config.space ||
+    config.tool_name ||
+    config.mcp_servers ||
+    config.name ||
+    config.connector_id ||
+    resource?.value ||
+    ''
+  );
+};
+
+const getApplicationResources = (app: DbgptApp) =>
+  (app.details || []).flatMap((detail) =>
+    (detail.resources || []).map((resource) => ({
+      agent: detail.agent_name || 'Agent',
+      resource,
+    })),
+  );
+
+const getApplicationResourceBindings = (app: DbgptApp) => {
+  const resources = getApplicationResources(app).map(({ agent, resource }) => ({
+    key: `${agent}-${resource.type}-${resource.name}-${resource.value}`,
+    type: resource.type || 'resource',
+    label: resource.name || resource.type || 'Resource',
+    value: getResourceValueLabel(resource),
+    owner: agent,
+  }));
+
+  const nativeResource = getNativeResourceSummary(app);
+  if (nativeResource) {
+    resources.push({
+      key: `native-${nativeResource.type}-${nativeResource.value}`,
+      type: nativeResource.type,
+      label: getChatScene(app),
+      value: nativeResource.value,
+      owner: 'Native template',
+    });
   }
-  return blocks;
-};
 
-const stripRuntimeMarkdown = (value: string) => {
-  return value
-    .replace(/`{3,}vis-thinking[\s\S]*?`{3,}/g, '')
-    .replace(/```agent-plans\s*\n[\s\S]*?\n```/g, '')
-    .replace(/```agent-messages\s*\n[\s\S]*?\n```/g, '')
-    .trim();
-};
-
-const extractAgentMessages = (vis: string) => {
-  const messages: string[] = [];
-  extractFenceBlocks(vis, 'agent-messages').forEach((block) => {
-    try {
-      const parsed = JSON.parse(block) as Array<{
-        sender?: string;
-        markdown?: string;
-      }>;
-      parsed.forEach((item) => {
-        const sender = String(item.sender || '').toLowerCase();
-        const markdown = stripRuntimeMarkdown(String(item.markdown || ''));
-        if (sender !== 'human' && markdown) {
-          messages.push(markdown);
-        }
-      });
-    } catch {
-      // Ignore nested agent-message strings embedded inside the agent-plan JSON.
-    }
-  });
-  return messages;
-};
-
-const summarizeDbgptStreamEvents = (events: string[]) => {
-  let finalAgentMessage = '';
-  const fallbackParts: string[] = [];
-
-  events.forEach((raw) => {
-    if (!raw || raw === '[DONE]') return;
-    try {
-      const parsed = JSON.parse(raw);
-      if (typeof parsed.vis === 'string') {
-        const messages = extractAgentMessages(parsed.vis);
-        if (messages.length) {
-          finalAgentMessage = messages[messages.length - 1];
-          return;
-        }
-        const fallback = stripRuntimeMarkdown(parsed.vis);
-        if (fallback && fallback !== '[DONE]') fallbackParts.push(fallback);
-        return;
-      }
-
-      const content =
-        parsed.choices?.[0]?.delta?.content ||
-        parsed.choices?.[0]?.message?.content ||
-        parsed.context ||
-        parsed.response;
-      if (typeof content === 'string' && content.trim()) {
-        fallbackParts.push(content.trim());
-      }
-    } catch {
-      const fallback = raw.replace(/\\n/g, '\n').trim();
-      if (fallback) fallbackParts.push(fallback);
-    }
-  });
-
-  const result = finalAgentMessage || fallbackParts.join('\n').trim();
-  if (/401 Client Error: Unauthorized/i.test(result)) {
-    return [
-      'DB-GPT model authorization failed.',
-      '',
-      result,
-      '',
-      'Check the DB-GPT LLM and embedding API endpoint/key configuration.',
-    ].join('\n');
-  }
-  return result || 'No response content.';
-};
-
-const extractSseEvents = (text: string) => {
-  return text
-    .split(/\r?\n/)
-    .filter((line) => line.startsWith('data:'))
-    .map((line) => line.replace(/^data:\s*/, ''))
-    .filter(Boolean);
-};
-
-const readStreamResponse = async (response: Response) => {
-  const contentType = response.headers.get('content-type') || '';
-  if (contentType.includes('text/event-stream') && response.body) {
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    const events: string[] = [];
-    let pending = '';
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      pending += decoder.decode(value, { stream: true });
-      const lines = pending.split(/\r?\n/);
-      pending = lines.pop() || '';
-      lines.forEach((line) => {
-        if (!line.startsWith('data:')) return;
-        const raw = line.replace(/^data:\s*/, '');
-        if (raw) events.push(raw);
+  if (app.team_mode === 'awel_layout') {
+    const workflowName =
+      (app.team_context?.label as string) ||
+      (app.team_context?.name as string) ||
+      '';
+    if (workflowName) {
+      resources.push({
+        key: `workflow-${workflowName}`,
+        type: 'workflow',
+        label: workflowName,
+        value: 'Composes resources inside the selected workflow',
+        owner: 'Workflow',
       });
     }
-    if (pending.startsWith('data:')) {
-      const raw = pending.replace(/^data:\s*/, '');
-      if (raw) events.push(raw);
-    }
-    return summarizeDbgptStreamEvents(events);
   }
-  const text = await response.text();
-  if (text.includes('data:'))
-    return summarizeDbgptStreamEvents(extractSseEvents(text));
-  try {
-    return JSON.stringify(JSON.parse(text), null, 2);
-  } catch {
-    return text || 'No response content.';
+
+  return resources;
+};
+
+const getApplicationBoundResourceSummary = (app: DbgptApp) => {
+  const bindings = getApplicationResourceBindings(app);
+  if (!bindings.length) return 'No resources bound';
+  const counts = bindings.reduce<Record<string, number>>((acc, binding) => {
+    const type = getPublishResourceType({ type: binding.type }) || binding.type;
+    acc[type] = (acc[type] || 0) + 1;
+    return acc;
+  }, {});
+  return Object.entries(counts)
+    .map(([type, count]) => `${count} ${type}${count > 1 ? 's' : ''}`)
+    .join(', ');
+};
+
+const getNativeResourceSummary = (app: DbgptApp) => {
+  const resource = app.param_need?.find((item) => item.type === 'resource');
+  if (!resource?.value) return undefined;
+  return {
+    type: String(resource.value),
+    value: resource.bind_value || 'Selected at runtime',
+  };
+};
+
+const getApplicationRuntimeRoute = (app: DbgptApp) => {
+  if (['single_agent', 'auto_plan'].includes(app.team_mode || '')) {
+    const agents = (app.details || [])
+      .map((detail) => detail.agent_name)
+      .filter(Boolean);
+    const resources = getApplicationResources(app);
+    return {
+      builderKey: 'details',
+      builderValue: agents.length ? agents.join(', ') : 'No agent selected',
+      runtimeKey: 'chat_agent',
+      runtimeValue: resources.length
+        ? resources.map(({ resource }) => resource.name || resource.type).join(', ')
+        : 'No bound resources',
+    };
   }
+
+  if (app.team_mode === 'awel_layout') {
+    const workflowName =
+      (app.team_context?.label as string) ||
+      (app.team_context?.name as string) ||
+      '';
+    return {
+      builderKey: 'team_context',
+      builderValue: workflowName || 'No workflow selected',
+      runtimeKey: 'chat_agent',
+      runtimeValue: workflowName || 'Workflow is not configured',
+    };
+  }
+
+  if (app.team_mode === 'native_app') {
+    const resource = app.param_need?.find((item) => item.type === 'resource');
+    return {
+      builderKey: 'param_need',
+      builderValue: getChatScene(app),
+      runtimeKey: getChatScene(app),
+      runtimeValue:
+        resource?.bind_value ||
+        (resource?.value ? `${resource.value} selected at runtime` : 'No resource required'),
+    };
+  }
+
+  return {
+    builderKey: 'work_mode',
+    builderValue: app.team_mode || 'Mode unset',
+    runtimeKey: 'app_code',
+    runtimeValue: app.app_code || 'Application code unavailable',
+  };
+};
+
+const getApplicationRuntimeStatus = (app: DbgptApp): RuntimeStatus => {
+  if (isPublished(app) && getAppRuntimeReady(app)) {
+    return {
+      label: 'Ready',
+      detail: 'Published runtime can start a unified conversation.',
+      tone: 'success',
+    };
+  }
+  if (getAppRuntimeReady(app)) {
+    return {
+      label: 'Ready to publish',
+      detail: 'Configuration is saved; publish to expose Start.',
+      tone: 'default',
+    };
+  }
+  const blockingGaps = getBlockingGaps(app);
+  return {
+    label: 'Needs configuration',
+    detail: blockingGaps[0] || getAppActionHint(app),
+    tone: 'error',
+  };
+};
+
+const getRuntimeStatusColor = (status: RuntimeStatus) => {
+  if (status.tone === 'success') return 'green';
+  if (status.tone === 'error') return 'orange';
+  return 'blue';
+};
+
+const getDisplayDate = (value?: string) => {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
 };
 
 function TeamModeSelect({
@@ -1009,7 +1573,16 @@ function ApplicationModal({
 }) {
   const [form] = Form.useForm<AppFormValues>();
   const selectedMode = Form.useWatch('team_mode', form);
+  const selectedModeInfo = teamModes.find(
+    (item) => item.value === selectedMode,
+  );
   const modeDescription = getModeDescription(selectedMode, teamModes);
+  const modeRemark =
+    selectedModeInfo?.remark_en ||
+    selectedModeInfo?.remark ||
+    selectedModeInfo?.description_en ||
+    selectedModeInfo?.description ||
+    '';
 
   useEffect(() => {
     if (!open) return;
@@ -1048,239 +1621,65 @@ function ApplicationModal({
             }
           />
         )}
-        <Form form={form} layout="vertical" requiredMark={false}>
-          <Form.Item
-            label="Work mode"
-            name="team_mode"
-            rules={[{ required: true, message: 'Select a work mode.' }]}
-          >
-            <TeamModeSelect disabled={mode === 'edit'} options={teamModes} />
-          </Form.Item>
-          {modeDescription && (
-            <Alert
-              className="mb-4"
-              type="info"
-              showIcon
-              message={getModeLabel(selectedMode, teamModes)}
-              description={modeDescription}
-            />
-          )}
-          <Form.Item
-            label="Application name"
-            name="app_name"
-            rules={[
-              { required: true, message: 'Enter an application name.' },
-              { max: 80, message: 'Use 80 characters or fewer.' },
-            ]}
-          >
-            <Input autoComplete="off" placeholder="Application name" />
-          </Form.Item>
-          <Form.Item
-            label="Description"
-            name="app_describe"
-            rules={[
-              { required: true, message: 'Enter a description.' },
-              { max: 500, message: 'Use 500 characters or fewer.' },
-            ]}
-          >
-            <Input.TextArea
-              autoComplete="off"
-              placeholder="Describe what this application does"
-              autoSize={{ minRows: 3, maxRows: 7 }}
-            />
-          </Form.Item>
-        </Form>
+        <ModalCreateLayout>
+          <Form form={form} layout="vertical" requiredMark={false}>
+            <Form.Item
+              label="Work mode"
+              name="team_mode"
+              rules={[{ required: true, message: 'Select a work mode.' }]}
+            >
+              <TeamModeSelect disabled={mode === 'edit'} options={teamModes} />
+            </Form.Item>
+            <Form.Item
+              label="Application name"
+              name="app_name"
+              rules={[
+                { required: true, message: 'Enter an application name.' },
+                { max: 80, message: 'Use 80 characters or fewer.' },
+              ]}
+            >
+              <Input autoComplete="off" placeholder="Application name" />
+            </Form.Item>
+            <Form.Item
+              label="Description"
+              name="app_describe"
+              rules={[
+                { required: true, message: 'Enter a description.' },
+                { max: 500, message: 'Use 500 characters or fewer.' },
+              ]}
+            >
+              <Input.TextArea
+                autoComplete="off"
+                placeholder="Describe what this application does"
+                autoSize={{ minRows: 3, maxRows: 7 }}
+              />
+            </Form.Item>
+          </Form>
+          <ModeExplainer>
+            <ModeExplainerHeader>
+              <ModeExplainerIcon>
+                {selectedMode ? (
+                  <ModeIcon src={getTeamModeIcon(selectedMode)} alt="" />
+                ) : (
+                  <AppstoreOutlined />
+                )}
+              </ModeExplainerIcon>
+              <div style={{ minWidth: 0 }}>
+                <DetailValue>
+                  {getModeLabel(selectedMode, teamModes)}
+                </DetailValue>
+                <DetailLabel>
+                  {modeDescription || 'Select a DB-GPT work mode.'}
+                </DetailLabel>
+              </div>
+            </ModeExplainerHeader>
+            {modeRemark && (
+              <Paragraph className="gray-7 mb-0">{modeRemark}</Paragraph>
+            )}
+          </ModeExplainer>
+        </ModalCreateLayout>
       </Spin>
     </Modal>
-  );
-}
-
-function ApplicationDetailsDrawer({
-  app,
-  open,
-  loading,
-  teamModes,
-  actionLoading,
-  onClose,
-  onChat,
-  onCopyShareLink,
-  onEdit,
-  onConfigure,
-  onOperate,
-  onDelete,
-}: {
-  app: DbgptApp | null;
-  open: boolean;
-  loading: boolean;
-  teamModes: DbgptTeamMode[];
-  actionLoading: string | null;
-  onClose: () => void;
-  onChat: (app: DbgptApp) => void;
-  onCopyShareLink: (app: DbgptApp) => void;
-  onEdit: (app: DbgptApp) => void;
-  onConfigure: (app: DbgptApp) => void;
-  onOperate: (app: DbgptApp) => void;
-  onDelete: (app: DbgptApp) => void;
-}) {
-  const published = app ? isPublished(app) : false;
-  const publishKey = app
-    ? `${published ? 'unpublish' : 'publish'}:${app.app_code}`
-    : '';
-  const runnable = app ? getAppCompleteness(app) && published : false;
-
-  return (
-    <Drawer
-      destroyOnClose
-      width={620}
-      visible={open}
-      title={app?.app_name || 'Application'}
-      onClose={onClose}
-      footer={
-        app ? (
-          <FooterActions>
-            <Button
-              type="primary"
-              icon={<SendOutlined />}
-              disabled={!runnable}
-              onClick={() => onChat(app)}
-            >
-              Chat
-            </Button>
-            <Button
-              icon={<ShareAltOutlined />}
-              onClick={() => onCopyShareLink(app)}
-            >
-              Share
-            </Button>
-            <Button
-              icon={<AppstoreOutlined />}
-              onClick={() => onConfigure(app)}
-            >
-              Configure
-            </Button>
-            <Button icon={<EditOutlined />} onClick={() => onEdit(app)}>
-              Edit
-            </Button>
-            <Button
-              icon={published ? <StopOutlined /> : <RocketOutlined />}
-              loading={actionLoading === publishKey}
-              onClick={() => onOperate(app)}
-            >
-              {published ? 'Unpublish' : 'Publish'}
-            </Button>
-            <Button
-              danger
-              icon={<DeleteOutlined />}
-              onClick={() => onDelete(app)}
-            >
-              Delete
-            </Button>
-          </FooterActions>
-        ) : null
-      }
-    >
-      <Spin spinning={loading}>
-        {app && (
-          <>
-            <DrawerSection>
-              <div className="d-flex justify-space-between align-center mb-3">
-                <Title level={5} className="mb-0">
-                  Use this application
-                </Title>
-                <StatusTag status={published ? 'published' : 'unpublished'} />
-              </div>
-              <Paragraph className="gray-7 mb-0">
-                {app.app_describe || 'No description.'}
-              </Paragraph>
-              {!published && (
-                <Alert
-                  className="mt-3"
-                  type="warning"
-                  showIcon
-                  message="Publish before users can call this application."
-                />
-              )}
-              {published && !getAppCompleteness(app) && (
-                <Alert
-                  className="mt-3"
-                  type="warning"
-                  showIcon
-                  message="Complete application configuration before chat."
-                />
-              )}
-            </DrawerSection>
-
-            <DrawerSection>
-              <DetailGrid>
-                <DetailItem>
-                  <DetailLabel>Invocation</DetailLabel>
-                  <DetailValue>
-                    {app.team_mode === 'native_app'
-                      ? 'Native app chat'
-                      : 'Agent chat application'}
-                  </DetailValue>
-                </DetailItem>
-                <DetailItem>
-                  <DetailLabel>Work mode</DetailLabel>
-                  <DetailValue>
-                    {getModeLabel(app.team_mode, teamModes)}
-                  </DetailValue>
-                </DetailItem>
-                <DetailItem>
-                  <DetailLabel>Chat scene</DetailLabel>
-                  <DetailValue>{getAppChatMode(app)}</DetailValue>
-                </DetailItem>
-                <DetailItem>
-                  <DetailLabel>Application code</DetailLabel>
-                  <DetailValue>{app.app_code}</DetailValue>
-                </DetailItem>
-                <DetailItem>
-                  <DetailLabel>Owner</DetailLabel>
-                  <DetailValue>{app.owner_name || 'unset'}</DetailValue>
-                </DetailItem>
-                <DetailItem>
-                  <DetailLabel>Updated</DetailLabel>
-                  <DetailValue>{app.updated_at || 'unset'}</DetailValue>
-                </DetailItem>
-              </DetailGrid>
-            </DrawerSection>
-
-            <DrawerSection>
-              <Title level={5} className="mb-0">
-                Configuration summary
-              </Title>
-              <ConfigSummary className="mt-3">
-                {getAppConfigurationSummary(app, teamModes).map((item) => (
-                  <ConfigSummaryItem key={item.label}>
-                    <DetailLabel>{item.label}</DetailLabel>
-                    <DetailValue>{item.value}</DetailValue>
-                  </ConfigSummaryItem>
-                ))}
-              </ConfigSummary>
-            </DrawerSection>
-
-            <DrawerSection>
-              <Title level={5} className="mb-0">
-                Recommended questions
-              </Title>
-              {getRecommendQuestions(app).length ? (
-                <ConfigSummary className="mt-3">
-                  {getRecommendQuestions(app).map((item, index) => (
-                    <ConfigSummaryItem key={`${item.question}-${index}`}>
-                      <DetailValue>{item.question}</DetailValue>
-                    </ConfigSummaryItem>
-                  ))}
-                </ConfigSummary>
-              ) : (
-                <Paragraph className="gray-7 mt-3 mb-0">
-                  No recommended questions configured.
-                </Paragraph>
-              )}
-            </DrawerSection>
-          </>
-        )}
-      </Spin>
-    </Drawer>
   );
 }
 
@@ -1291,6 +1690,24 @@ const parseResourceValue = (value?: string) => {
   } catch {
     return {};
   }
+};
+
+const parseStrategyValue = (value?: string) => {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((item) => (typeof item === 'string' ? item : String(item || '')))
+        .filter(Boolean);
+    }
+  } catch {
+    // Older DB-GPT records may store this as a comma-separated string.
+  }
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter((item) => item && item !== '""');
 };
 
 const isComplexOptionList = (values?: DbgptConfigurableParam['valid_values']) =>
@@ -1307,11 +1724,86 @@ const buildDefaultResourceConfig = (params?: DbgptConfigurableParam[]) => {
   const defaults: Record<string, unknown> = {};
   (params || []).forEach((param) => {
     if (param.nested_fields) return;
-    if (param.default_value !== undefined) {
+    if (
+      param.default_value !== undefined &&
+      param.default_value !== null &&
+      param.default_value !== ''
+    ) {
       defaults[param.param_name] = param.default_value;
+      return;
+    }
+    if (
+      param.required &&
+      Array.isArray(param.valid_values) &&
+      param.valid_values.length === 1
+    ) {
+      const onlyOption = param.valid_values[0];
+      defaults[param.param_name] =
+        typeof onlyOption === 'object' && onlyOption !== null
+          ? (onlyOption as DbgptResourceOption).key
+          : onlyOption;
     }
   });
   return defaults;
+};
+
+const buildResourceConfigWithFallbacks = (
+  params?: DbgptConfigurableParam[],
+  fallbackName?: string,
+) => {
+  const defaults = buildDefaultResourceConfig(params);
+  if (params?.some((param) => param.param_name === 'name') && !defaults.name) {
+    defaults.name = fallbackName || 'Resource';
+  }
+  return defaults;
+};
+
+const getResourceDisplayName = (
+  type?: string,
+  values?: Record<string, unknown>,
+  fallbackName?: string,
+) => {
+  if (typeof values?.name === 'string' && values.name) return values.name;
+  if (typeof values?.db_name === 'string' && values.db_name)
+    return values.db_name;
+  if (typeof values?.space === 'string' && values.space) return values.space;
+  if (typeof values?.space_name === 'string' && values.space_name)
+    return values.space_name;
+  if (typeof values?.tool_name === 'string' && values.tool_name)
+    return values.tool_name;
+  if (typeof values?.app_code === 'string' && values.app_code)
+    return values.app_code;
+  return fallbackName || type || 'Resource';
+};
+
+const normalizeResourceWithSchema = (
+  resource: DbgptAppResource,
+  params?: DbgptConfigurableParam[],
+  fallbackName?: string,
+) => {
+  if (!resource.type || resource.is_dynamic || !params?.length) {
+    return resource;
+  }
+  const current = parseResourceValue(resource.value);
+  const defaults = buildResourceConfigWithFallbacks(
+    params,
+    fallbackName || resource.name || resource.type,
+  );
+  let changed = false;
+  Object.entries(defaults).forEach(([key, defaultValue]) => {
+    if (current[key] === undefined || current[key] === '') {
+      current[key] = defaultValue;
+      changed = true;
+    }
+  });
+  const displayName = getResourceDisplayName(
+    resource.type,
+    current,
+    resource.name || fallbackName,
+  );
+  return changed || displayName !== resource.name
+    ? { ...resource, name: displayName, value: JSON.stringify(current) }
+    : resource;
 };
 
 const renderParamInput = (
@@ -1487,22 +1979,30 @@ function ResourceParamEditor({
 }
 
 function ResourceEditor({
+  agentName,
   value,
   resourceTypes,
   resourceParamSchemas,
   resourceParamLoading,
+  resourceOptions,
   onLoadParamSchema,
+  onLoadOptions,
   onChange,
 }: {
+  agentName?: string;
   value?: DbgptAppResource[];
   resourceTypes: string[];
   resourceParamSchemas: Record<string, DbgptConfigurableParam[]>;
   resourceParamLoading: Record<string, boolean>;
+  resourceOptions: Record<string, DbgptResourceOption[]>;
   onLoadParamSchema: (type: string) => void;
+  onLoadOptions: (type: string) => void;
   onChange?: (value: DbgptAppResource[]) => void;
 }) {
   const resources = value || [];
   const availableTypes = resourceTypes.filter((type) => type !== 'all');
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [filterType, setFilterType] = useState('all');
   const updateAt = (index: number, patch: Partial<DbgptAppResource>) => {
     const next = resources.map((item, idx) =>
       idx === index ? { ...item, ...patch } : item,
@@ -1510,101 +2010,232 @@ function ResourceEditor({
     onChange?.(next);
   };
 
+  const filteredResources = resources
+    .map((resource, index) => ({ resource, index }))
+    .filter(
+      ({ resource }) => filterType === 'all' || resource.type === filterType,
+    );
+  const activeResource = resources[activeIndex];
+  const activeParams = activeResource?.type
+    ? resourceParamSchemas[activeResource.type]
+    : [];
+  const activeConfigValues = parseResourceValue(activeResource?.value);
+  const preferredResourceType =
+    agentName === 'DataScientist'
+      ? 'database'
+      : agentName === 'ToolExpert'
+        ? 'tool'
+        : undefined;
+
   const updateConfig = (index: number, field: string, nextValue: unknown) => {
     const current = parseResourceValue(resources[index]?.value);
     const next = { ...current, [field]: nextValue };
-    updateAt(index, { value: JSON.stringify(next) });
+    const label =
+      field === 'db_name'
+        ? getOptionLabel(resourceOptions.database, nextValue)
+        : undefined;
+    updateAt(index, {
+      value: JSON.stringify(next),
+      ...(label ? { name: label } : {}),
+    });
+  };
+
+  const appendResource = () => {
+    const type =
+      preferredResourceType && availableTypes.includes(preferredResourceType)
+        ? preferredResourceType
+        : availableTypes[0];
+    if (type) onLoadParamSchema(type);
+    if (type) onLoadOptions(type);
+    const nextIndex = resources.length;
+    onChange?.([
+      ...resources,
+      {
+        name: `Resource ${nextIndex + 1}`,
+        type,
+        value: JSON.stringify(
+          buildResourceConfigWithFallbacks(
+            type ? resourceParamSchemas[type] : undefined,
+            `Resource ${nextIndex + 1}`,
+          ),
+        ),
+        is_dynamic: false,
+        context: null,
+        version: 'v2',
+      },
+    ]);
+    setActiveIndex(nextIndex);
+    setFilterType('all');
   };
 
   useEffect(() => {
-    const nextResources = resources.map((resource) => {
-      if (!resource.type || resource.is_dynamic) return resource;
-      const params = resourceParamSchemas[resource.type];
-      if (!params?.length) return resource;
-      const defaults = buildDefaultResourceConfig(params);
-      if (!Object.keys(defaults).length) return resource;
-      const current = parseResourceValue(resource.value);
-      let changed = false;
-      Object.entries(defaults).forEach(([key, defaultValue]) => {
-        if (current[key] === undefined) {
-          current[key] = defaultValue;
-          changed = true;
-        }
-      });
-      return changed
-        ? { ...resource, value: JSON.stringify(current) }
-        : resource;
+    const nextResources = resources.map((resource, index) => {
+      return normalizeResourceWithSchema(
+        resource,
+        resource.type ? resourceParamSchemas[resource.type] : undefined,
+        resource.name || `Resource ${index + 1}`,
+      );
     });
     const changed = JSON.stringify(nextResources) !== JSON.stringify(resources);
     if (changed) onChange?.(nextResources);
   }, [onChange, resourceParamSchemas, resources]);
 
+  useEffect(() => {
+    if (activeIndex > resources.length - 1) {
+      setActiveIndex(Math.max(resources.length - 1, 0));
+    }
+  }, [activeIndex, resources.length]);
+
+  useEffect(() => {
+    if (
+      activeResource?.type &&
+      !activeResource.is_dynamic &&
+      !resourceParamSchemas[activeResource.type] &&
+      !resourceParamLoading[activeResource.type]
+    ) {
+      onLoadParamSchema(activeResource.type);
+      onLoadOptions(activeResource.type);
+    }
+  }, [
+    activeResource?.is_dynamic,
+    activeResource?.type,
+    onLoadParamSchema,
+    resourceParamLoading,
+    resourceParamSchemas,
+  ]);
+
   return (
-    <div>
-      {resources.map((resource, index) => {
-        const params = resource.type ? resourceParamSchemas[resource.type] : [];
-        const configValues = parseResourceValue(resource.value);
-        return (
-          <AgentDetailBox
-            key={`${resource.name || 'resource'}-${index}`}
-            style={{ background: '#fff' }}
-          >
+    <ResourceWorkspace>
+      <ResourceSidebar>
+        <Select
+          value={filterType}
+          size="small"
+          options={[
+            { label: 'All', value: 'all' },
+            ...availableTypes.map((type) => ({ label: type, value: type })),
+          ]}
+          onChange={(nextType) => {
+            setFilterType(nextType);
+            const nextResource = resources.findIndex(
+              (resource) => nextType === 'all' || resource.type === nextType,
+            );
+            setActiveIndex(nextResource >= 0 ? nextResource : 0);
+          }}
+        />
+        <ResourceList>
+          {filteredResources.map(({ resource, index }) => (
+            <ResourceTab
+              key={`${resource.name || 'resource'}-${index}`}
+              type="button"
+              $active={index === activeIndex}
+              onClick={() => setActiveIndex(index)}
+            >
+              <ResourceIcon>{getResourceIcon(resource.type)}</ResourceIcon>
+              <Text ellipsis style={{ flex: 1, minWidth: 0 }}>
+                {resource.name || resource.type || `Resource ${index + 1}`}
+              </Text>
+            </ResourceTab>
+          ))}
+        </ResourceList>
+        <Button
+          block
+          type="dashed"
+          size="small"
+          icon={<PlusOutlined />}
+          onClick={appendResource}
+        >
+          Add resource
+        </Button>
+      </ResourceSidebar>
+
+      <ResourcePanel>
+        {!activeResource ? (
+          <Alert
+            type="info"
+            showIcon
+            message="No resource configured"
+            description="Add a database, knowledge base, plugin, file, or dynamic runtime resource for this agent."
+          />
+        ) : (
+          <>
             <ResourceRow>
               <Input
                 placeholder="Resource name"
-                value={resource.name}
+                value={activeResource.name}
                 onChange={(event) =>
-                  updateAt(index, { name: event.target.value })
+                  updateAt(activeIndex, { name: event.target.value })
                 }
               />
               <Select
                 placeholder="Resource type"
-                value={resource.type}
+                value={activeResource.type}
                 options={availableTypes.map((type) => ({
-                  label: type,
+                  label: (
+                    <span>
+                      <ResourceIcon>{getResourceIcon(type)}</ResourceIcon>
+                      {type}
+                    </span>
+                  ),
                   value: type,
                 }))}
                 onChange={(type) => {
                   onLoadParamSchema(type);
-                  updateAt(index, {
+                  onLoadOptions(type);
+                  const defaults = buildResourceConfigWithFallbacks(
+                    resourceParamSchemas[type],
+                    activeResource.name || `Resource ${activeIndex + 1}`,
+                  );
+                  updateAt(activeIndex, {
                     type,
-                    value: '',
-                    name: resource.name || `Resource ${index + 1}`,
+                    value: Object.keys(defaults).length
+                      ? JSON.stringify(defaults)
+                      : '',
+                    name: activeResource.name || `Resource ${activeIndex + 1}`,
+                    context: null,
+                    version: 'v2',
                   });
                 }}
               />
               <Switch
                 checkedChildren="Dynamic"
                 unCheckedChildren="Static"
-                checked={Boolean(resource.is_dynamic)}
+                checked={Boolean(activeResource.is_dynamic)}
                 onChange={(checked) =>
-                  updateAt(index, {
+                  updateAt(activeIndex, {
                     is_dynamic: checked,
-                    value: checked ? '' : resource.value,
+                    value: checked ? '' : activeResource.value,
+                    version: 'v2',
                   })
                 }
               />
               <Button
                 danger
-                onClick={() =>
-                  onChange?.(resources.filter((_, idx) => idx !== index))
-                }
+                onClick={() => {
+                  const nextResources = resources.filter(
+                    (_, idx) => idx !== activeIndex,
+                  );
+                  onChange?.(nextResources);
+                  setActiveIndex(Math.max(activeIndex - 1, 0));
+                }}
               >
                 Remove
               </Button>
             </ResourceRow>
-            {resource.type && !resource.is_dynamic && (
-              <Spin spinning={Boolean(resourceParamLoading[resource.type])}>
-                {params?.length ? (
-                  params.map((param) => (
+            {activeResource.type && !activeResource.is_dynamic && (
+              <Spin
+                spinning={Boolean(resourceParamLoading[activeResource.type])}
+              >
+                {activeParams?.length ? (
+                  activeParams.map((param) => (
                     <ResourceParamEditor
                       key={param.param_name}
                       param={param}
                       value={
-                        configValues[param.param_name] ?? param.default_value
+                        activeConfigValues[param.param_name] ??
+                        param.default_value
                       }
                       onChange={(nextValue) =>
-                        updateConfig(index, param.param_name, nextValue)
+                        updateConfig(activeIndex, param.param_name, nextValue)
                       }
                     />
                   ))
@@ -1617,30 +2248,305 @@ function ResourceEditor({
                 )}
               </Spin>
             )}
-          </AgentDetailBox>
-        );
-      })}
-      <Button
-        block
-        type="dashed"
-        icon={<PlusOutlined />}
-        onClick={() => {
-          const type = availableTypes[0];
-          if (type) onLoadParamSchema(type);
-          onChange?.([
-            ...resources,
-            {
-              name: `Resource ${resources.length + 1}`,
-              type,
-              value: '',
-              is_dynamic: false,
-            },
-          ]);
-        }}
-      >
-        Add resource
-      </Button>
-    </div>
+          </>
+        )}
+      </ResourcePanel>
+    </ResourceWorkspace>
+  );
+}
+
+function ResourcePublishPanel({
+  agentName,
+  catalog,
+  resourceParamSchemas,
+  resourceParamLoading,
+  resourceOptions,
+  resourceLoading,
+  onLoadParamSchema,
+  onLoadOptions,
+  onValuesMutated,
+}: {
+  agentName: string;
+  catalog: CatalogState;
+  resourceParamSchemas: Record<string, DbgptConfigurableParam[]>;
+  resourceParamLoading: Record<string, boolean>;
+  resourceOptions: Record<string, DbgptResourceOption[]>;
+  resourceLoading: Record<string, boolean>;
+  onLoadParamSchema: (type: string) => void;
+  onLoadOptions: (type: string) => void;
+  onValuesMutated: () => void;
+}) {
+  const form = Form.useFormInstance<ConfigureFormValues>();
+  const agentDetails = Form.useWatch('agent_details') || {};
+  const resources = agentDetails?.[agentName]?.resources || [];
+  const availableKinds = getAvailablePublishKinds(catalog.resourceTypes);
+  const [kind, setKind] = useState<ResourcePublishKind>(
+    availableKinds[0] || 'database',
+  );
+  const [selectedKey, setSelectedKey] = useState<string>();
+  const resourceType = getBestResourceTypeForKind(kind, catalog.resourceTypes);
+  const params = resourceType ? resourceParamSchemas[resourceType] : undefined;
+  const fieldName = getResourceOptionField(params, resourceType);
+  const selectedConnector =
+    kind === 'tool'
+      ? catalog.connectors.find((connector) => connector.id === selectedKey)
+      : undefined;
+  const selectableConnectors = catalog.connectors.filter(
+    (connector) =>
+      connector.status === 'active' && Boolean(connector.config?.server_uri),
+  );
+  const selectableOptions =
+    kind === 'tool'
+      ? selectableConnectors.map((connector) => ({
+          label: `${connector.display_name} (${connector.connector_type})`,
+          value: connector.id,
+          description: String(connector.config?.description || ''),
+        }))
+      : (resourceType ? resourceOptions[resourceType] : []) || [];
+  const boundResources = (resources || [])
+    .map((resource, index) => ({ resource, index }))
+    .filter(({ resource }) => {
+      const type = getPublishResourceType(resource);
+      return type && primaryResourceTypes.has(type);
+    });
+
+  useEffect(() => {
+    if (!availableKinds.includes(kind) && availableKinds.length) {
+      setKind(availableKinds[0]);
+      setSelectedKey(undefined);
+    }
+  }, [availableKinds, kind]);
+
+  useEffect(() => {
+    if (!resourceType) return;
+    onLoadParamSchema(resourceType);
+    if (kind !== 'tool') onLoadOptions(resourceType);
+  }, [kind, onLoadOptions, onLoadParamSchema, resourceType]);
+
+  const updateResources = (nextResources: DbgptAppResource[]) => {
+    const currentDetails = form.getFieldValue('agent_details') || {};
+    const currentAgent = currentDetails[agentName] || {};
+    form.setFieldsValue({
+      agent_details: {
+        ...currentDetails,
+        [agentName]: {
+          ...currentAgent,
+          resources: nextResources,
+        },
+      },
+    });
+    window.setTimeout(onValuesMutated, 0);
+  };
+
+  const addBoundResource = () => {
+    if (!resourceType) {
+      message.warning('This runtime does not expose that resource type.');
+      return;
+    }
+    if (resourceParamLoading[resourceType]) {
+      message.info('Resource schema is still loading.');
+      return;
+    }
+    const schema = resourceParamSchemas[resourceType];
+    if (!schema) {
+      onLoadParamSchema(resourceType);
+      message.info('Loading resource schema.');
+      return;
+    }
+    if (!selectedKey) {
+      message.warning(`Select a ${resourcePublishLabels[kind]}.`);
+      return;
+    }
+    const option =
+      kind === 'tool'
+        ? (
+            selectableOptions as Array<{
+              label: string;
+              value: string;
+              description: string;
+            }>
+          ).find((item) => item.value === selectedKey)
+        : (selectableOptions as DbgptResourceOption[]).find(
+            (item) => item.key === selectedKey,
+          );
+    const key =
+      kind === 'tool'
+        ? String(selectedConnector?.config?.server_uri || '')
+        : selectedKey;
+    if (kind === 'tool' && !key) {
+      message.warning('Selected connector is missing a server URI.');
+      return;
+    }
+    const nextResource = buildBoundResource({
+      type: resourceType,
+      label: option?.label || selectedKey,
+      key,
+      params: schema,
+      connector: selectedConnector,
+    });
+    updateResources([...(resources || []), nextResource]);
+    setSelectedKey(undefined);
+    message.success(`${resourcePublishLabels[kind]} bound.`);
+  };
+
+  const removeBoundResource = (index: number) => {
+    updateResources((resources || []).filter((_, itemIndex) => itemIndex !== index));
+  };
+
+  if (!agentName) return null;
+
+  return (
+    <Panel>
+      <PanelTitle>
+        <div>
+          <Title level={5} className="mb-0">
+            Publish resources
+          </Title>
+          <Text className="gray-7">
+            Bind a data product, knowledge space, or tool connector from the
+            current runtime. Workflow apps compose these same resources in the
+            Workflow page before publishing a compound app.
+          </Text>
+        </div>
+        <Tag>{agentName}</Tag>
+      </PanelTitle>
+
+      {!availableKinds.length ? (
+        <Alert
+          type="warning"
+          showIcon
+          message="Resource catalog is unavailable"
+          description="DB-GPT did not return database, knowledge, or tool resource types."
+        />
+      ) : (
+        <ResourcePickerShell>
+          <ResourcePublishGrid>
+            {(['database', 'knowledge', 'tool'] as ResourcePublishKind[]).map(
+              (item) => {
+                const enabled = availableKinds.includes(item);
+                return (
+                  <ResourcePublishCard
+                    key={item}
+                    data-testid={`resource-publish-kind-${item}`}
+                    type="button"
+                    disabled={!enabled}
+                    $selected={kind === item}
+                    onClick={() => {
+                      if (!enabled) return;
+                      setKind(item);
+                      setSelectedKey(undefined);
+                    }}
+                  >
+                    <div className="d-flex align-center">
+                      <ResourceIcon>
+                        {getResourceIcon(item === 'tool' ? 'tool(mcp(sse))' : item)}
+                      </ResourceIcon>
+                      <Text strong>{resourcePublishLabels[item]}</Text>
+                    </div>
+                    <DetailLabel className="mt-2">
+                      {item === 'database'
+                        ? 'Publish a WrenAI/DB-GPT database resource as a lightweight app.'
+                        : item === 'knowledge'
+                          ? 'Publish one DB-GPT knowledge space for Q&A.'
+                          : 'Publish an active MCP connector as a tool-backed app.'}
+                    </DetailLabel>
+                  </ResourcePublishCard>
+                );
+              },
+            )}
+          </ResourcePublishGrid>
+
+          <div>
+            <DetailLabel>{resourcePublishLabels[kind]}</DetailLabel>
+            <Select
+              data-testid="resource-publish-select"
+              className="w-100 mt-1"
+              showSearch
+              allowClear
+              loading={
+                resourceType
+                  ? resourceLoading[resourceType] ||
+                    resourceParamLoading[resourceType]
+                  : false
+              }
+              placeholder={
+                kind === 'tool'
+                  ? 'Select an active tool connector'
+                  : `Select ${fieldName || kind}`
+              }
+              value={selectedKey}
+              onChange={setSelectedKey}
+              options={
+                kind === 'tool'
+                  ? selectableOptions.map((item) => ({
+                      label: item.label,
+                      value: item.value,
+                    }))
+                  : (selectableOptions as DbgptResourceOption[]).map((item) => ({
+                      label: item.label || item.key,
+                      value: item.key,
+                    }))
+              }
+              notFoundContent={
+                kind === 'tool'
+                  ? 'No active tool connectors. Create one in Tools.'
+                  : 'No resources returned by the runtime.'
+              }
+            />
+            {kind === 'tool' && !selectableConnectors.length && (
+              <Alert
+                className="mt-3"
+                type="info"
+                showIcon
+                message="No active tool connector"
+                description="Open Tools to add and test a custom MCP connector. This selector only lists real active connectors."
+                action={
+                  <Link href={Path.Tools}>
+                    <Button size="small">Open Tools</Button>
+                  </Link>
+                }
+              />
+            )}
+            <Button
+              className="mt-3"
+              type="primary"
+              icon={<PlusOutlined />}
+              disabled={!resourceType || !selectedKey}
+              onClick={addBoundResource}
+            >
+              Bind resource
+            </Button>
+          </div>
+
+          <BoundResourceGrid>
+            <DetailLabel>Bound resources</DetailLabel>
+            {boundResources.length ? (
+              boundResources.map(({ resource, index }) => (
+                <ResourceSummaryItem key={`${resource.type}-${resource.name}-${index}`}>
+                  <ResourceIcon>{getResourceIcon(resource.type)}</ResourceIcon>
+                  <div style={{ minWidth: 0 }}>
+                    <Text strong ellipsis>
+                      {resource.name || resource.type}
+                    </Text>
+                    <DetailLabel>{String(getResourcePrimaryValue(resource))}</DetailLabel>
+                  </div>
+                  <Button size="small" danger onClick={() => removeBoundResource(index)}>
+                    Remove
+                  </Button>
+                </ResourceSummaryItem>
+              ))
+            ) : (
+              <Alert
+                type="info"
+                showIcon
+                message="No resources bound yet"
+                description="Bind a real runtime resource here, or use advanced parameters below."
+              />
+            )}
+          </BoundResourceGrid>
+        </ResourcePickerShell>
+      )}
+    </Panel>
   );
 }
 
@@ -1649,21 +2555,71 @@ function AgentConfiguration({
   catalog,
   resourceParamSchemas,
   resourceParamLoading,
+  resourceOptions,
+  resourceLoading,
   onLoadParamSchema,
+  onLoadOptions,
+  onValuesMutated,
 }: {
   app: DbgptApp;
   catalog: CatalogState;
   resourceParamSchemas: Record<string, DbgptConfigurableParam[]>;
   resourceParamLoading: Record<string, boolean>;
+  resourceOptions: Record<string, DbgptResourceOption[]>;
+  resourceLoading: Record<string, boolean>;
   onLoadParamSchema: (type: string) => void;
+  onLoadOptions: (type: string) => void;
+  onValuesMutated: () => void;
 }) {
   const form = Form.useFormInstance<ConfigureFormValues>();
   const selectedAgents = Form.useWatch('agent_names') || [];
+  const selectedAgentNames = Array.isArray(selectedAgents)
+    ? (selectedAgents as string[])
+    : [];
+  const selectedAgentKey = selectedAgentNames.join('|');
+  const [activeAgent, setActiveAgent] = useState(selectedAgentNames[0] || '');
   const isSingle = app.team_mode === 'single_agent';
   const strategyOptions = catalog.strategies.map((strategy) => ({
-    label: strategy.name,
+    label: strategy.name || strategy.name_cn || strategy.value,
     value: strategy.value,
   }));
+  const activeAgentInfo = catalog.agents.find(
+    (agent) => agent.name === activeAgent,
+  );
+
+  const ensureAgentDefaults = (agentNames: string[]) => {
+    const current = form.getFieldValue('agent_details') || {};
+    const nextDetails = { ...current };
+    let changed = false;
+    agentNames.forEach((agentName) => {
+      if (!nextDetails[agentName]) {
+        nextDetails[agentName] = {
+          llm_strategy: 'default',
+          llm_strategy_value: [],
+          prompt_template: undefined,
+          resources: [],
+        };
+        changed = true;
+      }
+    });
+    if (changed) {
+      form.setFieldsValue({ agent_details: nextDetails });
+    }
+  };
+
+  useEffect(() => {
+    if (
+      selectedAgentNames.length &&
+      !selectedAgentNames.includes(activeAgent)
+    ) {
+      setActiveAgent(selectedAgentNames[0]);
+    }
+    if (!selectedAgentNames.length && activeAgent) {
+      setActiveAgent('');
+    }
+    ensureAgentDefaults(selectedAgentNames);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeAgent, selectedAgentKey]);
 
   return (
     <Panel>
@@ -1693,110 +2649,215 @@ function AgentConfiguration({
             name="agent_names"
             rules={[{ required: true, message: 'Select at least one agent.' }]}
           >
-            <AgentGrid>
-              {catalog.agents.map((agent) => {
-                const selected = selectedAgents.includes(agent.name);
-                return (
-                  <AgentOption
-                    key={agent.name}
-                    $selected={selected}
-                    onClick={() => {
-                      const current = selectedAgents as string[];
-                      const next = isSingle
-                        ? [agent.name]
-                        : selected
-                          ? current.filter((item) => item !== agent.name)
-                          : [...current, agent.name];
-                      form.setFieldsValue({ agent_names: next });
-                    }}
-                  >
-                    <div className="d-flex align-center">
-                      <AgentCheck $selected={selected} />
-                      <Text strong>{agent.label || agent.name}</Text>
-                    </div>
-                    <Paragraph
-                      className="gray-7 mt-2 mb-0"
-                      ellipsis={{ rows: 2 }}
-                    >
-                      {agent.desc || agent.describe || 'No description.'}
-                    </Paragraph>
-                  </AgentOption>
+            <AgentSelectCards
+              agents={catalog.agents}
+              isSingle={isSingle}
+              onSelect={(next, selectedAgent) => {
+                ensureAgentDefaults(next);
+                setActiveAgent(
+                  next.includes(selectedAgent) ? selectedAgent : next[0] || '',
                 );
-              })}
-            </AgentGrid>
+              }}
+            />
           </Form.Item>
 
-          {(selectedAgents as string[]).map((agentName) => (
-            <AgentDetailBox key={agentName}>
-              <Title level={5}>{agentName}</Title>
-              <Form.Item
-                label="Prompt"
-                name={['agent_details', agentName, 'prompt_template']}
-              >
-                <Select
-                  allowClear
-                  showSearch
-                  placeholder="Select prompt"
-                  options={catalog.prompts.map((prompt) => ({
-                    label: prompt.prompt_name,
-                    value: prompt.prompt_code,
-                  }))}
-                />
-              </Form.Item>
-              <Form.Item
-                label="LLM strategy"
-                name={['agent_details', agentName, 'llm_strategy']}
-              >
-                <Select options={strategyOptions} />
-              </Form.Item>
-              <Form.Item
-                noStyle
-                shouldUpdate={(prev, current) =>
-                  prev?.agent_details?.[agentName]?.llm_strategy !==
-                  current?.agent_details?.[agentName]?.llm_strategy
-                }
-              >
-                {({ getFieldValue }) =>
-                  getFieldValue([
-                    'agent_details',
-                    agentName,
-                    'llm_strategy',
-                  ]) === 'priority' ? (
-                    <Form.Item
-                      label="Priority models"
-                      name={['agent_details', agentName, 'llm_strategy_value']}
+          {selectedAgentNames.length ? (
+            <AgentConfigShell>
+              <AgentTabs>
+                {selectedAgentNames.map((agentName) => {
+                  const agent = catalog.agents.find(
+                    (item) => item.name === agentName,
+                  );
+                  return (
+                    <AgentTab
+                      key={agentName}
+                      type="button"
+                      $active={agentName === activeAgent}
+                      onClick={() => setActiveAgent(agentName)}
                     >
-                      <Select
-                        mode="multiple"
-                        options={catalog.strategyValues.map((model) => ({
-                          label: model,
-                          value: model,
-                        }))}
-                      />
-                    </Form.Item>
-                  ) : null
-                }
-              </Form.Item>
-              <Form.Item
-                label="Resources"
-                name={['agent_details', agentName, 'resources']}
-              >
-                <ResourceEditor
-                  resourceTypes={catalog.resourceTypes}
+                      <ResourceIcon>{getAgentIcon(agentName)}</ResourceIcon>
+                      <Text ellipsis style={{ minWidth: 0 }}>
+                        {agent?.label || agentName}
+                      </Text>
+                    </AgentTab>
+                  );
+                })}
+              </AgentTabs>
+              <AgentDetailPanel>
+                <PanelTitle>
+                  <div style={{ minWidth: 0 }}>
+                    <Title level={5} className="mb-0">
+                      {activeAgentInfo?.label || activeAgent}
+                    </Title>
+                    <Paragraph
+                      className="gray-7 mt-1 mb-0"
+                      ellipsis={{ rows: 2 }}
+                    >
+                      {activeAgentInfo?.desc ||
+                        activeAgentInfo?.describe ||
+                        'Configure prompt, model strategy, and resources for this agent.'}
+                    </Paragraph>
+                  </div>
+                  <Tag>{isSingle ? 'Single agent' : 'Agent role'}</Tag>
+                </PanelTitle>
+                <ResourcePublishPanel
+                  agentName={activeAgent}
+                  catalog={catalog}
                   resourceParamSchemas={resourceParamSchemas}
                   resourceParamLoading={resourceParamLoading}
+                  resourceOptions={resourceOptions}
+                  resourceLoading={resourceLoading}
                   onLoadParamSchema={onLoadParamSchema}
+                  onLoadOptions={onLoadOptions}
+                  onValuesMutated={onValuesMutated}
                 />
-              </Form.Item>
-            </AgentDetailBox>
-          ))}
+                <Form.Item
+                  label="Prompt"
+                  name={['agent_details', activeAgent, 'prompt_template']}
+                >
+                  <Select
+                    allowClear
+                    showSearch
+                    placeholder="Select prompt"
+                    options={catalog.prompts.map((prompt) => ({
+                      label: prompt.prompt_name,
+                      value: prompt.prompt_code,
+                    }))}
+                  />
+                </Form.Item>
+                <Form.Item
+                  label="LLM strategy"
+                  name={['agent_details', activeAgent, 'llm_strategy']}
+                >
+                  <Select options={strategyOptions} />
+                </Form.Item>
+                <Form.Item
+                  noStyle
+                  shouldUpdate={(prev, current) =>
+                    prev?.agent_details?.[activeAgent]?.llm_strategy !==
+                    current?.agent_details?.[activeAgent]?.llm_strategy
+                  }
+                >
+                  {({ getFieldValue }) =>
+                    getFieldValue([
+                      'agent_details',
+                      activeAgent,
+                      'llm_strategy',
+                    ]) === 'priority' ? (
+                      <Form.Item
+                        label="Priority models"
+                        name={[
+                          'agent_details',
+                          activeAgent,
+                          'llm_strategy_value',
+                        ]}
+                      >
+                        <Select
+                          mode="multiple"
+                          options={catalog.strategyValues.map((model) => ({
+                            label: model,
+                            value: model,
+                          }))}
+                        />
+                      </Form.Item>
+                    ) : null
+                  }
+                </Form.Item>
+                <Form.Item
+                  label="Resources"
+                  name={['agent_details', activeAgent, 'resources']}
+                >
+                  <ResourceEditor
+                    agentName={activeAgent}
+                    resourceTypes={catalog.resourceTypes}
+                    resourceParamSchemas={resourceParamSchemas}
+                    resourceParamLoading={resourceParamLoading}
+                    resourceOptions={resourceOptions}
+                    onLoadParamSchema={onLoadParamSchema}
+                    onLoadOptions={onLoadOptions}
+                  />
+                </Form.Item>
+              </AgentDetailPanel>
+            </AgentConfigShell>
+          ) : (
+            <Alert
+              type="info"
+              showIcon
+              message="Choose an agent to continue"
+              description={
+                isSingle
+                  ? 'A single-agent application must select exactly one agent before it can be published.'
+                  : 'A multi-agent application can select multiple agents and configure each role separately.'
+              }
+            />
+          )}
         </>
       )}
     </Panel>
   );
 }
 
+function AgentSelectCards({
+  agents,
+  isSingle,
+  value,
+  onChange,
+  onSelect,
+}: {
+  agents: DbgptAgent[];
+  isSingle: boolean;
+  value?: string[];
+  onChange?: (value: string[]) => void;
+  onSelect: (value: string[], selectedAgent: string) => void;
+}) {
+  const selectedAgentNames = Array.isArray(value) ? value : [];
+  return (
+    <AgentGrid>
+      {agents.map((agent) => {
+        const selected = selectedAgentNames.includes(agent.name);
+        const description = agent.desc || agent.describe || '';
+        return (
+          <AgentOption
+            key={agent.name}
+            $selected={selected}
+            onClick={() => {
+              const next = isSingle
+                ? selected
+                  ? []
+                  : [agent.name]
+                : selected
+                  ? selectedAgentNames.filter((item) => item !== agent.name)
+                  : [...selectedAgentNames, agent.name];
+              onSelect(next, agent.name);
+              onChange?.(next);
+            }}
+          >
+            <OptionCheck $selected={selected} $single={isSingle} />
+            <ResourceIcon>{getAgentIcon(agent.name)}</ResourceIcon>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <Text strong ellipsis>
+                {agent.label || agent.name}
+              </Text>
+            </div>
+            {description && (
+              <Tooltip title={description}>
+                <Tag style={{ marginRight: 0 }}>{agent.name}</Tag>
+              </Tooltip>
+            )}
+          </AgentOption>
+        );
+      })}
+    </AgentGrid>
+  );
+}
+
 function AwelConfiguration({ catalog }: { catalog: CatalogState }) {
+  const flowName = Form.useWatch('flow_name');
+  const selectedFlow = catalog.flows.find((flow) => flow.name === flowName);
+  const flowData = selectedFlow?.flow_data
+    ? mapFlowDataToReactFlow(selectedFlow.flow_data)
+    : undefined;
+
   return (
     <Panel>
       <PanelTitle>
@@ -1821,20 +2882,40 @@ function AwelConfiguration({ catalog }: { catalog: CatalogState }) {
           }
         />
       ) : (
-        <Form.Item
-          label="Workflow"
-          name="flow_name"
-          rules={[{ required: true, message: 'Select a workflow.' }]}
-        >
-          <Select
-            showSearch
-            placeholder="Select workflow"
-            options={catalog.flows.map((flow) => ({
-              label: flow.label || flow.name,
-              value: flow.name,
-            }))}
-          />
-        </Form.Item>
+        <>
+          <Form.Item
+            label="Workflow"
+            name="flow_name"
+            rules={[{ required: true, message: 'Select a workflow.' }]}
+          >
+            <Select
+              showSearch
+              placeholder="Select workflow"
+              options={catalog.flows.map((flow) => ({
+                label: flow.label || flow.name,
+                value: flow.name,
+              }))}
+            />
+          </Form.Item>
+          {flowData && (
+            <FlowPreviewFrame>
+              <ReactFlow
+                nodes={(flowData.nodes || []) as never[]}
+                edges={(flowData.edges || []) as never[]}
+                fitView
+                nodesDraggable={false}
+                nodesConnectable={false}
+                elementsSelectable={false}
+                panOnDrag
+                zoomOnScroll
+                proOptions={{ hideAttribution: true }}
+              >
+                <Controls showInteractive={false} />
+                <Background color="#94a3b8" gap={16} />
+              </ReactFlow>
+            </FlowPreviewFrame>
+          )}
+        </>
       )}
     </Panel>
   );
@@ -1851,6 +2932,7 @@ function NativeConfiguration({
   resourceLoading: Record<string, boolean>;
   onLoadOptions: (type: string) => void;
 }) {
+  const form = Form.useFormInstance<ConfigureFormValues>();
   const chatScene = Form.useWatch('chat_scene');
   const scene = catalog.nativeScenes.find(
     (item) => item.chat_scene === chatScene,
@@ -1873,35 +2955,66 @@ function NativeConfiguration({
             Native app template
           </Title>
           <Text className="gray-7">
-            Bind a native DB-GPT scene to a resource and model parameters.
+            Choose a DB-GPT native scene, then either bind a fixed resource or
+            let users choose one at runtime.
           </Text>
         </div>
       </PanelTitle>
+      <Form.Item name="chat_scene" rules={[{ required: true }]} hidden>
+        <Input />
+      </Form.Item>
       <Form.Item
         label="Native scene"
-        name="chat_scene"
-        rules={[{ required: true, message: 'Select a native scene.' }]}
+        required
+        validateStatus={!chatScene ? 'warning' : undefined}
+        help={!chatScene ? 'Select a native scene.' : undefined}
       >
-        <Select
-          showSearch
-          placeholder="Select native scene"
-          options={catalog.nativeScenes.map((item) => ({
-            label: item.scene_name,
-            value: item.chat_scene,
-          }))}
-        />
+        <NativeSceneGrid>
+          {catalog.nativeScenes.map((item) => {
+            const selected = item.chat_scene === chatScene;
+            const type = item.param_need?.find(
+              (param) => param.type === 'resource',
+            )?.value;
+            return (
+              <NativeSceneCard
+                key={item.chat_scene}
+                type="button"
+                $selected={selected}
+                onClick={() => {
+                  form.setFieldsValue({
+                    chat_scene: item.chat_scene,
+                    bind_value: undefined,
+                  });
+                }}
+              >
+                <OptionCheck $selected={selected} $single />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div className="d-flex align-center">
+                    <ResourceIcon>
+                      {getResourceIcon(String(type || 'plugin'))}
+                    </ResourceIcon>
+                    <Text strong>{item.scene_name}</Text>
+                  </div>
+                  <Paragraph
+                    className="gray-7 mt-1 mb-0"
+                    ellipsis={{ rows: 2 }}
+                  >
+                    {item.scene_describe || item.chat_scene}
+                  </Paragraph>
+                  {type && <Tag className="mt-2">{String(type)}</Tag>}
+                </div>
+              </NativeSceneCard>
+            );
+          })}
+        </NativeSceneGrid>
       </Form.Item>
       {resourceType && resourceType !== 'excel_file' && (
-        <Form.Item
-          label={`Bind ${resourceType}`}
-          name="bind_value"
-          rules={[{ required: true, message: 'Bind a resource.' }]}
-        >
+        <Form.Item label={`Bind ${resourceType}`} name="bind_value">
           <Select
             showSearch
             allowClear
             loading={resourceLoading[resourceType]}
-            placeholder={`Select ${resourceType}`}
+            placeholder={`Select ${resourceType}, or leave empty for runtime selection`}
             options={(resourceOptions[resourceType] || []).map((item) => ({
               label: item.label || item.key,
               value: item.key,
@@ -2000,380 +3113,411 @@ function RecommendQuestionsEditor() {
   );
 }
 
-function RunApplicationPanel({
+function ApplicationBuildSteps({
   app,
-  disabled,
+  teamModes,
 }: {
   app: DbgptApp;
-  disabled: boolean;
+  teamModes: DbgptTeamMode[];
 }) {
-  const [question, setQuestion] = useState('');
-  const [messages, setMessages] = useState<RuntimeMessage[]>([]);
-  const [convUid, setConvUid] = useState('');
-  const [running, setRunning] = useState(false);
-
-  useEffect(() => {
-    setMessages([]);
-    setConvUid('');
-    setQuestion('');
-  }, [app.app_code]);
-
-  const ensureDialogue = async () => {
-    if (convUid) return convUid;
-    const dialogue = await createAppDialogue(app);
-    setConvUid(dialogue.convUid);
-    return dialogue.convUid;
-  };
-
-  const runApp = async (input = question) => {
-    if (!input.trim()) return;
-    setRunning(true);
-    const userMessage: RuntimeMessage = {
-      id: `${Date.now()}-user`,
-      role: 'user',
-      content: input,
-    };
-    setMessages((current) => [...current, userMessage]);
-    setQuestion('');
-    try {
-      const currentConvUid = await ensureDialogue();
-      const answer = await sendAppChat(app, currentConvUid, input);
-      setMessages((current) => [
-        ...current,
-        {
-          id: `${Date.now()}-assistant`,
-          role: 'assistant',
-          content: answer,
-        },
-      ]);
-    } catch (err) {
-      setMessages((current) => [
-        ...current,
-        {
-          id: `${Date.now()}-error`,
-          role: 'assistant',
-          content:
-            err instanceof Error ? err.message : 'Application run failed.',
-        },
-      ]);
-    } finally {
-      setRunning(false);
-    }
-  };
+  const hasBaseInfo = Boolean(app.app_name && app.team_mode);
+  const configured = getAppCompleteness(app);
+  const runtimeReady = getAppRuntimeReady(app);
+  const published = isPublished(app);
+  const callable = runtimeReady && published;
+  const steps = [
+    {
+      title: 'Base info',
+      detail: getModeLabel(app.team_mode, teamModes),
+      done: hasBaseInfo,
+      active: !hasBaseInfo,
+    },
+    {
+      title: 'Work mode config',
+      detail: getWorkModeConfigLabel(app),
+      done: configured,
+      active: hasBaseInfo && !configured,
+    },
+    {
+      title: 'Publish',
+      detail: published ? 'Published to runtime' : 'Not published',
+      done: published,
+      active: runtimeReady && !published,
+    },
+    {
+      title: 'Invoke',
+      detail: callable
+        ? 'Chat/API available'
+        : runtimeReady
+          ? 'Waiting for publish'
+          : 'Waiting for runtime context',
+      done: callable,
+      active: callable,
+    },
+  ];
 
   return (
-    <Panel>
-      <PanelTitle>
-        <div>
-          <Title level={5} className="mb-0">
-            Chat
-          </Title>
-          <Text className="gray-7">
-            Creates a DB-GPT dialogue and calls this published application.
-          </Text>
-        </div>
-        <Tag color={disabled ? 'orange' : 'green'}>
-          {disabled ? 'Needs config' : convUid ? 'Dialogue active' : 'Ready'}
-        </Tag>
-      </PanelTitle>
-      <RunPanel>
-        {disabled && (
-          <Alert
-            type="warning"
-            showIcon
-            message="Complete configuration before running"
-            description="The app has no usable agent, workflow, or bound native resource yet."
-          />
-        )}
-        <ChatSession>
-          <ChatSessionMessages>
-            {messages.length ? (
-              messages.map((item) => (
-                <ChatSessionMessage key={item.id} $role={item.role}>
-                  <ChatSessionBubble $role={item.role}>
-                    {item.content}
-                  </ChatSessionBubble>
-                </ChatSessionMessage>
-              ))
-            ) : (
-              <Paragraph className="gray-7 mb-0">
-                Start a conversation with this application.
-              </Paragraph>
-            )}
-          </ChatSessionMessages>
-          <ChatSessionComposer>
-            <Input.TextArea
-              value={question}
-              disabled={disabled || running}
-              placeholder="Ask this application"
-              autoSize={{ minRows: 3, maxRows: 6 }}
-              onChange={(event) => setQuestion(event.target.value)}
-              onPressEnter={(event) => {
-                if (!event.shiftKey) {
-                  event.preventDefault();
-                  runApp();
-                }
-              }}
-            />
-            <div className="d-flex justify-space-between align-center mt-3">
-              <Text className="gray-7 text-sm">
-                {convUid ? `Conversation ${convUid}` : 'New conversation'}
-              </Text>
-              <Button
-                type="primary"
-                icon={<SendOutlined />}
-                disabled={disabled || !question.trim()}
-                loading={running}
-                onClick={() => runApp()}
-              >
-                Send
-              </Button>
-            </div>
-          </ChatSessionComposer>
-        </ChatSession>
-      </RunPanel>
-    </Panel>
+    <StepRail>
+      {steps.map((step) => (
+        <StepItem key={step.title} $done={step.done} $active={step.active}>
+          <DetailValue>{step.title}</DetailValue>
+          <DetailLabel>{step.detail}</DetailLabel>
+        </StepItem>
+      ))}
+    </StepRail>
   );
 }
 
-function ApplicationChatView({
-  session,
+function ApplicationLifecyclePanel({
+  app,
   teamModes,
-  actionLoading,
-  onBack,
-  onConfigure,
-  onOperate,
-  onCopyShareLink,
 }: {
-  session: ChatSessionState;
+  app: DbgptApp;
   teamModes: DbgptTeamMode[];
-  actionLoading: string | null;
-  onBack: () => void;
-  onConfigure: (app: DbgptApp) => void;
-  onOperate: (app: DbgptApp) => void;
-  onCopyShareLink: (app: DbgptApp) => void;
 }) {
-  const { app, convUid, chatMode } = session;
-  const [question, setQuestion] = useState('');
-  const [messages, setMessages] = useState<RuntimeMessage[]>([]);
-  const [running, setRunning] = useState(false);
+  const mode = app.team_mode || '';
+  const configured = getAppCompleteness(app);
+  const runtimeReady = getAppRuntimeReady(app);
   const published = isPublished(app);
-  const runnable = published && getAppCompleteness(app);
-  const publishKey = `${published ? 'unpublish' : 'publish'}:${app.app_code}`;
-  const recommendedQuestions = getRecommendQuestions(app).filter(
-    (item) => item.question,
+  const callable = runtimeReady && published;
+  const resources = getApplicationResources(app);
+  const nativeResource = getNativeResourceSummary(app);
+  const runtimeRoute = getApplicationRuntimeRoute(app);
+  const workflowName =
+    (app.team_context?.label as string) ||
+    (app.team_context?.name as string) ||
+    '';
+  const lifecycle = [
+    {
+      title: 'Create application',
+      detail: getModeLabel(mode, teamModes),
+      done: Boolean(app.app_code && app.app_name && mode),
+      active: !mode,
+    },
+    {
+      title: 'Configure work mode',
+      detail: getModeConfigurationTarget(mode),
+      done: configured,
+      active: Boolean(mode && !configured),
+    },
+    {
+      title: 'Publish',
+      detail: published
+        ? 'Visible from the application entry'
+        : 'Required before users can start a conversation',
+      done: published,
+      active: runtimeReady && !published,
+    },
+    {
+      title: 'Start conversation',
+      detail: callable
+        ? 'Users can ask from the runtime page'
+        : 'Blocked until configuration and publish are complete',
+      done: callable,
+      active: callable,
+    },
+  ];
+
+  return (
+    <>
+      <LifecyclePanel>
+        <PanelTitle>
+          <div>
+            <Title level={5} className="mb-0">
+              Lifecycle
+            </Title>
+            <Text className="gray-7">
+              Create, configure, publish, then start from the unified runtime.
+            </Text>
+          </div>
+          <Tag>{mode || 'unset'}</Tag>
+        </PanelTitle>
+        <LifecycleList>
+          {lifecycle.map((item, index) => (
+            <LifecycleItem
+              key={item.title}
+              $done={item.done}
+              $active={item.active}
+            >
+              <LifecycleDot $done={item.done} $active={item.active}>
+                {item.done ? '✓' : index + 1}
+              </LifecycleDot>
+              <div style={{ minWidth: 0 }}>
+                <DetailValue style={{ marginTop: 0 }}>{item.title}</DetailValue>
+                <DetailLabel>{item.detail}</DetailLabel>
+              </div>
+            </LifecycleItem>
+          ))}
+        </LifecycleList>
+      </LifecyclePanel>
+
+      <LifecyclePanel>
+        <PanelTitle>
+          <div>
+            <Title level={5} className="mb-0">
+              Runtime context
+            </Title>
+            <Text className="gray-7">Resources used when users ask.</Text>
+          </div>
+          <Tag color={runtimeReady ? 'green' : 'orange'}>
+            {runtimeReady ? 'Ready' : 'Needs setup'}
+          </Tag>
+        </PanelTitle>
+
+        {['single_agent', 'auto_plan'].includes(mode) ? (
+          resources.length ? (
+            <ResourceSummaryList>
+              {resources.map(({ agent, resource }, index) => (
+                <ResourceSummaryItem
+                  key={`${agent}-${resource.type}-${resource.name}-${index}`}
+                >
+                  <ResourceIcon>{getResourceIcon(resource.type)}</ResourceIcon>
+                  <div style={{ minWidth: 0 }}>
+                    <Text strong>{resource.name || resource.type}</Text>
+                    <DetailLabel>
+                      {agent} / {getResourceValueLabel(resource)}
+                    </DetailLabel>
+                  </div>
+                  <Tag>{resource.type}</Tag>
+                </ResourceSummaryItem>
+              ))}
+            </ResourceSummaryList>
+          ) : (
+            <Alert
+              type="info"
+              showIcon
+              message="No runtime resource or prompt is configured"
+              description="Bind a database, knowledge space, tool, workflow, or prompt before publishing."
+            />
+          )
+        ) : mode === 'awel_layout' ? (
+          workflowName ? (
+            <ResourceSummaryItem>
+              <ResourceIcon>
+                <DeploymentUnitOutlined />
+              </ResourceIcon>
+              <div style={{ minWidth: 0 }}>
+                <Text strong>{workflowName}</Text>
+                <DetailLabel>AWEL workflow selected for this app</DetailLabel>
+              </div>
+              <Tag>workflow</Tag>
+            </ResourceSummaryItem>
+          ) : (
+            <Alert
+              type="info"
+              showIcon
+              message="No workflow selected"
+              description="Choose one AWEL workflow before publishing."
+            />
+          )
+        ) : mode === 'native_app' ? (
+          nativeResource ? (
+            <ResourceSummaryItem>
+              <ResourceIcon>{getResourceIcon(nativeResource.type)}</ResourceIcon>
+              <div style={{ minWidth: 0 }}>
+                <Text strong>{getChatScene(app)}</Text>
+                <DetailLabel>{nativeResource.value}</DetailLabel>
+              </div>
+              <Tag>{nativeResource.type}</Tag>
+            </ResourceSummaryItem>
+          ) : (
+            <Alert
+              type="info"
+              showIcon
+              message="Native template is not configured"
+              description="Choose a native scene and bind its resource."
+            />
+          )
+        ) : (
+          <Alert
+            type="info"
+            showIcon
+            message="Choose a work mode"
+            description="Application behavior depends on DB-GPT work mode."
+          />
+        )}
+
+        <EntryHint>
+          <DetailLabel>User entry</DetailLabel>
+          <DetailValue>
+            Cards open this builder. The Start action opens the published
+            runtime and calls the saved application configuration.
+          </DetailValue>
+          <RouteSummaryList>
+            <ConfigSummaryItem>
+              <DetailLabel>Builder configuration</DetailLabel>
+              <DetailValue>
+                {runtimeRoute.builderKey}: {runtimeRoute.builderValue}
+              </DetailValue>
+            </ConfigSummaryItem>
+            <ConfigSummaryItem>
+              <DetailLabel>Runtime route</DetailLabel>
+              <DetailValue>
+                {runtimeRoute.runtimeKey}: {runtimeRoute.runtimeValue}
+              </DetailValue>
+            </ConfigSummaryItem>
+          </RouteSummaryList>
+        </EntryHint>
+      </LifecyclePanel>
+    </>
   );
+}
 
-  useEffect(() => {
-    setMessages([]);
-    setQuestion('');
-  }, [app.app_code, convUid]);
+function ApplicationConfigNotice({ app }: { app: DbgptApp }) {
+  const gaps = getAppConfigurationGaps(app);
+  const hasResourceGap = gaps.some((gap) =>
+    gap.startsWith('Bind at least one resource'),
+  );
+  const blockingGaps = getBlockingGaps(app);
+  if (blockingGaps.length > 0) {
+    return (
+      <Alert
+        className="mt-4"
+        type="warning"
+        showIcon
+        message={blockingGaps[0]}
+      />
+    );
+  }
+  if (hasResourceGap) {
+    return (
+      <Alert
+        className="mt-4"
+        type="info"
+        showIcon
+        message="Agent runtime context is missing."
+        description="Bind a database, knowledge space, workflow, skill, tool, or prompt before exposing this application to users."
+      />
+    );
+  }
+  if (!isPublished(app)) {
+    return (
+      <Alert
+        className="mt-4"
+        type="info"
+        showIcon
+        message="Configuration can be published after saving."
+      />
+    );
+  }
+  return (
+    <Alert
+      className="mt-4"
+      type="success"
+      showIcon
+      message="Published application is ready to run."
+    />
+  );
+}
 
-  const send = async (input = question) => {
-    if (!input.trim() || running || !runnable) return;
-    setRunning(true);
-    setQuestion('');
-    setMessages((current) => [
-      ...current,
-      {
-        id: `${Date.now()}-user`,
-        role: 'user',
-        content: input,
-      },
-    ]);
+function ApplicationInvocationPanel({
+  app,
+  dirty,
+}: {
+  app: DbgptApp;
+  dirty: boolean;
+}) {
+  const configured = getAppCompleteness(app);
+  const published = isPublished(app);
+  const callable = getAppRuntimeReady(app) && published && !dirty;
+  const appUrl = getApplicationShareUrl(app);
+  const dialogueEndpoint = getDialogueCreationEndpoint(app);
+  const completionEndpoint = getApiInvocationEndpoint(app);
+  const runtimeContract = getAppRuntimeContract(app);
+
+  const copyValue = async (value: string, label: string) => {
     try {
-      const answer = await sendAppChat(app, convUid, input);
-      setMessages((current) => [
-        ...current,
-        {
-          id: `${Date.now()}-assistant`,
-          role: 'assistant',
-          content: answer,
-        },
-      ]);
-    } catch (err) {
-      setMessages((current) => [
-        ...current,
-        {
-          id: `${Date.now()}-error`,
-          role: 'assistant',
-          content:
-            err instanceof Error ? err.message : 'Application chat failed.',
-        },
-      ]);
-    } finally {
-      setRunning(false);
+      await copyToClipboard(value);
+      message.success(`${label} copied.`);
+    } catch {
+      message.error(`Unable to copy ${label.toLowerCase()}.`);
     }
   };
 
   return (
-    <ConstructLayout
-      activeKey="applications"
-      icon={<SendOutlined />}
-      title={app.app_name}
-      description="Application chat session created from DB-GPT dialogue runtime."
-      actions={
-        <>
-          <Button icon={<LeftOutlined />} onClick={onBack}>
-            Back to apps
-          </Button>
+    <Panel className="mt-4">
+      <PanelTitle>
+        <div>
+          <Title level={5} className="mb-0">
+            Invocation
+          </Title>
+          <Text className="gray-7">
+            {runtimeContract.title}: run users against the saved application
+            configuration and bound resources.
+          </Text>
+        </div>
+        <Tag color={callable ? 'green' : 'orange'}>
+          {callable ? 'Callable' : dirty ? 'Save required' : 'Not callable'}
+        </Tag>
+      </PanelTitle>
+      {!callable && (
+        <Alert
+          className="mb-4"
+          type="info"
+          showIcon
+          message={
+            dirty
+              ? 'Save these changes before users call the application.'
+              : configured
+                ? 'Publish this application before exposing it to users.'
+                : 'Complete the work mode configuration before publishing.'
+          }
+        />
+      )}
+      <InvocationGrid>
+        <ConfigSummaryItem>
+          <DetailLabel>User entry</DetailLabel>
+          <DetailValue>
+            <Text copyable={{ text: appUrl }}>{appUrl}</Text>
+          </DetailValue>
           <Button
-            icon={<ShareAltOutlined />}
-            onClick={() => onCopyShareLink(app)}
+            className="mt-3"
+            size="small"
+            onClick={() => copyValue(appUrl, 'Application URL')}
           >
-            Copy app link
+            Copy URL
           </Button>
-          <Button icon={<AppstoreOutlined />} onClick={() => onConfigure(app)}>
-            Configure
-          </Button>
-        </>
-      }
-    >
-      <ChatWorkspace>
-        <ChatMain>
-          <ChatHeader>
-            <div style={{ minWidth: 0 }}>
-              <Title level={5} className="mb-0">
-                {app.app_name}
-              </Title>
-              <AppMeta>
-                <Tag>{getModeLabel(app.team_mode, teamModes)}</Tag>
-                <StatusTag status={published ? 'published' : 'unpublished'} />
-                <Tag>{chatMode}</Tag>
-              </AppMeta>
-            </div>
-            <FooterActions>
-              <Button
-                icon={published ? <StopOutlined /> : <RocketOutlined />}
-                loading={actionLoading === publishKey}
-                onClick={() => onOperate(app)}
-              >
-                {published ? 'Unpublish' : 'Publish'}
-              </Button>
-            </FooterActions>
-          </ChatHeader>
-          <ChatBody>
-            {!runnable && (
-              <Alert
-                className="mb-4"
-                type="warning"
-                showIcon
-                message="This application is not callable yet"
-                description="Publish the application and complete its agent, workflow, or native app configuration before chat."
-              />
-            )}
-            {messages.length ? (
-              messages.map((item) => (
-                <ChatSessionMessage key={item.id} $role={item.role}>
-                  <ChatSessionBubble $role={item.role}>
-                    {item.content}
-                  </ChatSessionBubble>
-                </ChatSessionMessage>
-              ))
-            ) : (
-              <ChatEmptyState>
-                <div>
-                  <Title level={5}>Start a conversation</Title>
-                  <Paragraph className="gray-7 mb-0">
-                    This session calls DB-GPT with the application code and
-                    dialogue id, matching the DB-GPT application chat path.
-                  </Paragraph>
-                </div>
-              </ChatEmptyState>
-            )}
-          </ChatBody>
-          <ChatComposer>
-            <Input.TextArea
-              value={question}
-              disabled={!runnable || running}
-              placeholder="Ask this application"
-              autoSize={{ minRows: 2, maxRows: 6 }}
-              onChange={(event) => setQuestion(event.target.value)}
-              onPressEnter={(event) => {
-                if (!event.shiftKey) {
-                  event.preventDefault();
-                  send();
-                }
-              }}
-            />
-            <div className="d-flex justify-space-between align-center mt-3">
-              <Text className="gray-7 text-sm">Conversation {convUid}</Text>
-              <Button
-                type="primary"
-                icon={<SendOutlined />}
-                disabled={!runnable || !question.trim()}
-                loading={running}
-                onClick={() => send()}
-              >
-                Send
-              </Button>
-            </div>
-          </ChatComposer>
-        </ChatMain>
-        <ChatSide>
-          <Panel>
-            <Title level={5} className="mb-0">
-              Runtime
-            </Title>
-            <DetailGrid className="mt-3">
-              <DetailItem>
-                <DetailLabel>Work mode</DetailLabel>
-                <DetailValue>
-                  {getModeLabel(app.team_mode, teamModes)}
-                </DetailValue>
-              </DetailItem>
-              <DetailItem>
-                <DetailLabel>Chat scene</DetailLabel>
-                <DetailValue>{chatMode}</DetailValue>
-              </DetailItem>
-              <DetailItem>
-                <DetailLabel>Application code</DetailLabel>
-                <DetailValue>{app.app_code}</DetailValue>
-              </DetailItem>
-              <DetailItem>
-                <DetailLabel>Dialogue</DetailLabel>
-                <DetailValue>{convUid}</DetailValue>
-              </DetailItem>
-            </DetailGrid>
-          </Panel>
-          <Panel>
-            <Title level={5} className="mb-0">
-              Configuration
-            </Title>
-            <ConfigSummary className="mt-3">
-              {getAppConfigurationSummary(app, teamModes).map((item) => (
-                <ConfigSummaryItem key={item.label}>
-                  <DetailLabel>{item.label}</DetailLabel>
-                  <DetailValue>{item.value}</DetailValue>
-                </ConfigSummaryItem>
-              ))}
-            </ConfigSummary>
-          </Panel>
-          <Panel>
-            <Title level={5} className="mb-0">
-              Recommended questions
-            </Title>
-            {recommendedQuestions.length ? (
-              <ConfigSummary className="mt-3">
-                {recommendedQuestions.map((item, index) => (
-                  <Button
-                    key={`${item.question}-${index}`}
-                    disabled={!runnable || running}
-                    onClick={() => send(item.question)}
-                  >
-                    {item.question}
-                  </Button>
-                ))}
-              </ConfigSummary>
-            ) : (
-              <Paragraph className="gray-7 mt-3 mb-0">
-                No recommended questions configured.
-              </Paragraph>
-            )}
-          </Panel>
-        </ChatSide>
-      </ChatWorkspace>
-    </ConstructLayout>
+        </ConfigSummaryItem>
+        <ConfigSummaryItem>
+          <DetailLabel>Dialogue endpoint</DetailLabel>
+          <DetailValue>
+            <Text copyable={{ text: dialogueEndpoint }}>
+              {dialogueEndpoint}
+            </Text>
+          </DetailValue>
+          <DetailLabel className="mt-2">
+            {runtimeContract.dialogueMode === 'veadk_data_product'
+              ? 'The conversation id is created by the local runtime.'
+              : `Creates a ${runtimeContract.dialogueMode} conversation.`}
+          </DetailLabel>
+        </ConfigSummaryItem>
+        <ConfigSummaryItem>
+          <DetailLabel>Ask endpoint</DetailLabel>
+          <DetailValue>
+            <Text copyable={{ text: completionEndpoint }}>
+              {completionEndpoint}
+            </Text>
+          </DetailValue>
+          <DetailLabel className="mt-2">
+            {runtimeContract.appSelector}
+          </DetailLabel>
+        </ConfigSummaryItem>
+      </InvocationGrid>
+      <FieldList>
+        {runtimeContract.requestFields.map((field) => (
+          <Fragment key={field.label}>
+            <DetailLabel>{field.label}</DetailLabel>
+            <DetailValue>{field.value}</DetailValue>
+          </Fragment>
+        ))}
+      </FieldList>
+      <Alert
+        className="mt-3"
+        type="info"
+        showIcon
+        message={runtimeContract.resourceSelector}
+      />
+    </Panel>
   );
 }
 
@@ -2389,9 +3533,7 @@ function buildConfigureInitialValues(app: DbgptApp): ConfigureFormValues {
       if (!detail.agent_name) return;
       agentDetails[detail.agent_name] = {
         llm_strategy: detail.llm_strategy || 'default',
-        llm_strategy_value: detail.llm_strategy_value
-          ? detail.llm_strategy_value.split(',').filter(Boolean)
-          : [],
+        llm_strategy_value: parseStrategyValue(detail.llm_strategy_value),
         prompt_template: detail.prompt_template,
         resources: normalizeResources(detail.resources),
       };
@@ -2434,6 +3576,7 @@ function buildConfigurePayload(
   app: DbgptApp,
   values: ConfigureFormValues,
   catalog: CatalogState,
+  resourceSchemas: Record<string, DbgptConfigurableParam[]> = {},
 ): DbgptAppPayload {
   const base: DbgptAppPayload = {
     app_code: app.app_code,
@@ -2453,14 +3596,23 @@ function buildConfigurePayload(
     base.details = (values.agent_names || []).map((agentName) => {
       const detail = values.agent_details?.[agentName] || {};
       const strategyValue = Array.isArray(detail.llm_strategy_value)
-        ? detail.llm_strategy_value.join(',')
+        ? detail.llm_strategy_value.filter(Boolean).join(',')
         : detail.llm_strategy_value || '';
+      const resources = normalizeResources(detail.resources).map(
+        (resource, index) =>
+          normalizeResourceWithSchema(
+            resource,
+            resource.type ? resourceSchemas[resource.type] : undefined,
+            resource.name || `Resource ${index + 1}`,
+          ),
+      );
       return {
         agent_name: agentName,
         llm_strategy: detail.llm_strategy || 'default',
-        llm_strategy_value: strategyValue,
+        llm_strategy_value:
+          detail.llm_strategy === 'priority' ? strategyValue : '',
         prompt_template: detail.prompt_template || '',
-        resources: normalizeResources(detail.resources),
+        resources,
       };
     });
   }
@@ -2500,6 +3652,40 @@ function buildConfigurePayload(
   }
 
   return base;
+}
+
+function buildConfigureDraftApp(
+  app: DbgptApp,
+  values: ConfigureFormValues,
+  catalog: CatalogState,
+  resourceSchemas: Record<string, DbgptConfigurableParam[]> = {},
+): DbgptApp {
+  const payload = buildConfigurePayload(app, values, catalog, resourceSchemas);
+  return {
+    ...app,
+    ...payload,
+    details: payload.details ?? app.details,
+    team_context: payload.team_context ?? app.team_context,
+    param_need: payload.param_need ?? app.param_need,
+    recommend_questions: payload.recommend_questions ?? app.recommend_questions,
+  };
+}
+
+function buildAppEditPayload(
+  app: DbgptApp,
+  values: AppFormValues,
+): DbgptAppPayload {
+  return {
+    app_code: app.app_code,
+    app_name: values.app_name,
+    app_describe: values.app_describe,
+    team_mode: app.team_mode || values.team_mode,
+    language: app.language || 'zh',
+    details: app.details || [],
+    team_context: app.team_context || undefined,
+    param_need: app.param_need || [],
+    recommend_questions: app.recommend_questions || [],
+  };
 }
 
 const collectMissingResourceParams = (
@@ -2579,6 +3765,7 @@ const validateConfiguredResources = (
 };
 
 export default function Applications() {
+  const router = useRouter();
   const [configureForm] = Form.useForm<ConfigureFormValues>();
   const [apps, setApps] = useState<DbgptApp[]>([]);
   const [teamModes, setTeamModes] = useState<DbgptTeamMode[]>([]);
@@ -2604,7 +3791,6 @@ export default function Applications() {
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
-  const [detailsLoading, setDetailsLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [teamModeError, setTeamModeError] = useState<string | null>(null);
@@ -2612,10 +3798,11 @@ export default function Applications() {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<AppModalMode>('create');
   const [editingApp, setEditingApp] = useState<DbgptApp | null>(null);
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  const [selectedApp, setSelectedApp] = useState<DbgptApp | null>(null);
   const [configuringApp, setConfiguringApp] = useState<DbgptApp | null>(null);
-  const [chatSession, setChatSession] = useState<ChatSessionState | null>(null);
+  const [configureDraftApp, setConfigureDraftApp] = useState<DbgptApp | null>(
+    null,
+  );
+  const [configureDirty, setConfigureDirty] = useState(false);
   const loadTeamModes = useCallback(async () => {
     setTeamModesLoading(true);
     setTeamModeError(null);
@@ -2637,49 +3824,115 @@ export default function Applications() {
     setCatalogError(null);
     try {
       const [
-        agents,
-        strategies,
-        strategyValues,
-        resourceTypes,
-        nativeScenes,
-        promptList,
-        models,
-        flows,
+        agentsResult,
+        strategiesResult,
+        strategyValuesResult,
+        resourceTypesResult,
+        nativeScenesResult,
+        promptListResult,
+        modelsResult,
+        flowsResult,
+        connectorsResult,
       ] = await Promise.all([
-        fetchDbgpt<DbgptAgent[]>('/api/v1/agents/list'),
-        fetchDbgpt<DbgptStrategy[]>('/api/v1/llm-strategy/list'),
-        fetchDbgpt<string[]>('/api/v1/llm-strategy/value/list?type=priority'),
-        fetchDbgpt<string[]>('/api/v1/resource-type/list'),
-        fetchDbgpt<DbgptNativeScene[]>('/api/v1/native_scenes'),
-        fetchDbgpt<DbgptPromptListResponse>(
-          '/prompt/query_page?page=1&page_size=100000',
+        loadCatalogSection(
+          'Agents',
+          fetchDbgpt<DbgptAgent[]>('/api/v1/agents/list'),
+          [],
+        ),
+        loadCatalogSection(
+          'LLM strategies',
+          fetchDbgpt<DbgptStrategy[]>('/api/v1/llm-strategy/list'),
+          [],
+        ),
+        loadCatalogSection(
+          'Priority models',
+          fetchDbgpt<string[]>('/api/v1/llm-strategy/value/list?type=priority'),
+          [],
+        ),
+        loadCatalogSection(
+          'Resource types',
+          fetchDbgpt<string[]>('/api/v1/resource-type/list'),
+          [],
+        ),
+        loadCatalogSection(
+          'Native scenes',
+          fetchDbgpt<DbgptNativeScene[]>('/api/v1/native_scenes'),
+          [],
+        ),
+        loadCatalogSection(
+          'Prompts',
+          fetchDbgpt<DbgptPromptListResponse>(
+            '/prompt/query_page?page=1&page_size=100000',
+            {
+              method: 'POST',
+              body: JSON.stringify({ page: 1, page_size: 100000 }),
+            },
+          ),
           {
-            method: 'POST',
-            body: JSON.stringify({ page: 1, page_size: 100000 }),
+            items: [],
+            total_count: 0,
+            total_pages: 0,
+            page: 1,
+            page_size: 100000,
           },
         ),
-        fetchDbgpt<string[]>('/api/v1/model/types'),
-        fetchDbgpt<{
-          items: DbgptFlow[];
-          total_count: number;
-          total_pages: number;
-          page: number;
-          page_size: number;
-        }>('/api/v2/serve/awel/flows?page=1&page_size=10000'),
+        loadCatalogSection(
+          'Models',
+          fetchDbgpt<string[]>('/api/v1/model/types'),
+          [],
+        ),
+        loadCatalogSection(
+          'AWEL flows',
+          fetchDbgpt<{
+            items: DbgptFlow[];
+            total_count: number;
+            total_pages: number;
+            page: number;
+            page_size: number;
+          }>('/api/v2/serve/awel/flows?page=1&page_size=10000'),
+          {
+            items: [],
+            total_count: 0,
+            total_pages: 0,
+            page: 1,
+            page_size: 10000,
+          },
+        ),
+        loadCatalogSection(
+          'Tool connectors',
+          fetchDbgpt<ConnectorInstance[]>('/api/v2/serve/connectors'),
+          [],
+        ),
       ]);
       setCatalog({
-        agents: agents || [],
-        strategies: strategies || [],
-        strategyValues: strategyValues || [],
-        resourceTypes: resourceTypes || [],
-        nativeScenes: nativeScenes || [],
-        prompts: promptList?.items || [],
-        models: models || [],
-        flows: flows?.items || [],
+        agents: agentsResult.data || [],
+        strategies: strategiesResult.data || [],
+        strategyValues: strategyValuesResult.data || [],
+        resourceTypes: resourceTypesResult.data || [],
+        nativeScenes: nativeScenesResult.data || [],
+        prompts: promptListResult.data?.items || [],
+        models: modelsResult.data || [],
+        flows: flowsResult.data?.items || [],
+        connectors: (connectorsResult.data || []).map(normalizeConnector),
       });
+      const errors = [
+        agentsResult,
+        strategiesResult,
+        strategyValuesResult,
+        resourceTypesResult,
+        nativeScenesResult,
+        promptListResult,
+        modelsResult,
+        flowsResult,
+        connectorsResult,
+      ]
+        .map((item) => item.error)
+        .filter(Boolean);
+      if (errors.length) {
+        setCatalogError(errors.join('\n'));
+      }
     } catch (err) {
-      const messageText =
-        err instanceof Error ? err.message : 'Unable to load app catalog.';
+      const messageText = getErrorMessage(err, 'Unable to load app catalog.');
       setCatalogError(messageText);
       setCatalog(emptyCatalog);
     } finally {
@@ -2817,37 +4070,31 @@ export default function Applications() {
     return { ...app, ...info };
   };
 
-  const openDetails = async (app: DbgptApp) => {
-    setSelectedApp(app);
-    setDetailsOpen(true);
-    setDetailsLoading(true);
-    try {
-      setSelectedApp(await fetchAppInfo(app));
-    } catch (err) {
-      message.warning(
-        err instanceof Error
-          ? `Unable to load full application details: ${err.message}`
-          : 'Unable to load full application details.',
-      );
-    } finally {
-      setDetailsLoading(false);
-    }
-  };
-
   const openConfigure = async (app: DbgptApp) => {
-    setDetailsOpen(false);
-    clearApplicationUrlState();
-    setChatSession(null);
+    if (app.app_code) {
+      setApplicationConfigureUrlState(app.app_code);
+    }
     setConfiguringApp(app);
-    configureForm.resetFields();
     try {
-      if (!catalog.agents.length && !catalogLoading) {
+      const needsCatalog =
+        !catalog.agents.length ||
+        !catalog.resourceTypes.length ||
+        !catalog.nativeScenes.length;
+      if (needsCatalog && !catalogLoading) {
         await loadCatalog();
       }
       const fullApp = await fetchAppInfo(app);
       setConfiguringApp(fullApp);
+      setConfigureDraftApp(fullApp);
+      setConfigureDirty(false);
       const initialValues = buildConfigureInitialValues(fullApp);
       configureForm.setFieldsValue(initialValues);
+      ['database', 'knowledge', 'tool', 'tool(mcp(sse))'].forEach((type) => {
+        if (catalog.resourceTypes.includes(type)) {
+          loadResourceParamSchema(type);
+          if (type !== 'tool(mcp(sse))') loadResourceOptions(type);
+        }
+      });
       (fullApp.details || []).forEach((detail) => {
         (detail.resources || []).forEach((resource) => {
           if (resource.type) loadResourceParamSchema(resource.type);
@@ -2868,33 +4115,38 @@ export default function Applications() {
     }
   };
 
+  const updateConfigureDraft = () => {
+    if (!configuringApp) return;
+    const values = configureForm.getFieldsValue(true) as ConfigureFormValues;
+    setConfigureDraftApp(
+      buildConfigureDraftApp(
+        configuringApp,
+        values,
+        catalog,
+        resourceParamSchemas,
+      ),
+    );
+    setConfigureDirty(true);
+  };
+
   const startChat = async (app: DbgptApp) => {
     const fullApp = await fetchAppInfo(app).catch(() => app);
     if (!isPublished(fullApp)) {
       message.warning('Publish this application before chat.');
       return;
     }
-    if (!getAppCompleteness(fullApp)) {
-      message.warning('Complete application configuration before chat.');
+    if (!getAppRuntimeReady(fullApp)) {
+      const blockingGaps = getBlockingGaps(fullApp);
+      message.warning(
+        blockingGaps[0] || 'Complete application configuration before chat.',
+      );
       openConfigure(fullApp);
       return;
     }
     setActionLoading(`chat:${fullApp.app_code}`);
     try {
       const dialogue = await createAppDialogue(fullApp);
-      setDetailsOpen(false);
       setConfiguringApp(null);
-      setChatSession({
-        app: fullApp,
-        convUid: dialogue.convUid,
-        chatMode: dialogue.chatMode,
-      });
-      if (typeof window !== 'undefined') {
-        const url = new URL(window.location.href);
-        url.searchParams.set('mode', 'chat');
-        url.searchParams.set('app_code', fullApp.app_code);
-        window.history.replaceState(null, '', url.toString());
-      }
       if (typeof window !== 'undefined') {
         window.localStorage.setItem(
           'cur_dialog_info',
@@ -2904,6 +4156,13 @@ export default function Applications() {
           }),
         );
       }
+      router.push({
+        pathname: `${Path.ApplicationRun}/[appCode]`,
+        query: {
+          appCode: fullApp.app_code,
+          conv_uid: dialogue.convUid,
+        },
+      });
     } catch (err) {
       message.error(
         err instanceof Error
@@ -2915,45 +4174,26 @@ export default function Applications() {
     }
   };
 
-  const openSharedChat = useCallback(
-    async (appCode: string) => {
-      if (!appCode || chatSession?.app.app_code === appCode) return;
-      setActionLoading(`chat:${appCode}`);
-      try {
-        const data = await fetchDbgpt<DbgptAppListResponse>(
-          `/api/v1/app/list?page=1&page_size=10000`,
-          {
-            method: 'POST',
-            body: JSON.stringify({ page: 1, page_size: 10000 }),
-          },
-        );
-        const app = (data?.app_list || []).find(
-          (item) => item.app_code === appCode,
-        );
-        if (!app) {
-          throw new Error('Shared application was not found.');
-        }
-        await startChat(app);
-      } catch (err) {
-        message.error(
-          err instanceof Error
-            ? err.message
-            : 'Unable to open shared application.',
-        );
-      } finally {
-        setActionLoading(null);
-      }
-    },
-    [chatSession?.app.app_code],
-  );
-
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
-    if (params.get('mode') !== 'chat') return;
+    const mode = params.get('mode');
     const appCode = params.get('app_code');
-    if (appCode) openSharedChat(appCode);
-  }, [openSharedChat]);
+    if (mode === 'chat') {
+      if (!appCode) return;
+      router.replace(`${Path.ApplicationRun}/${encodeURIComponent(appCode)}`);
+      return;
+    }
+    if (mode !== 'configure') return;
+    if (!appCode) return;
+    if (configuringApp?.app_code === appCode) return;
+    openConfigure({
+      app_code: appCode,
+      app_name: 'Loading application',
+      app_describe: '',
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router.isReady, router.query.mode, router.query.app_code]);
 
   const copyAppShareLink = async (app: DbgptApp) => {
     try {
@@ -2976,31 +4216,47 @@ export default function Applications() {
   const submitApp = async (values: AppFormValues) => {
     setSubmitting(true);
     try {
-      const payload: DbgptAppPayload = {
-        language: 'zh',
-        app_name: values.app_name,
-        app_describe: values.app_describe,
-        team_mode: values.team_mode,
-      };
-      if (modalMode === 'edit' && editingApp?.app_code) {
-        payload.app_code = editingApp.app_code;
-      }
-      const saved = await fetchDbgpt<DbgptApp>(
-        modalMode === 'edit' ? '/api/v1/app/edit' : '/api/v1/app/create',
-        {
-          method: 'POST',
-          body: JSON.stringify(payload),
-        },
-      );
+      const payload: DbgptAppPayload =
+        modalMode === 'edit' && editingApp?.app_code
+          ? buildAppEditPayload(editingApp, values)
+          : {
+              language: 'zh',
+              app_name: values.app_name,
+              app_describe: values.app_describe,
+              team_mode: values.team_mode,
+            };
+      const saved =
+        modalMode === 'edit' && editingApp?.app_code
+          ? await fetchDbgpt<boolean>('/api/v1/app/edit', {
+              method: 'POST',
+              body: JSON.stringify(payload),
+            }).then(async () =>
+              fetchAppInfo({
+                ...editingApp,
+                ...payload,
+              } as DbgptApp),
+            )
+          : await fetchDbgpt<DbgptApp>('/api/v1/app/create', {
+              method: 'POST',
+              body: JSON.stringify(payload),
+            });
       message.success(
-        modalMode === 'edit' ? 'Application updated.' : 'Application created.',
+        modalMode === 'edit'
+          ? 'Application updated.'
+          : 'Application created. Configure its work mode next.',
       );
       setModalOpen(false);
       await loadApps(modalMode === 'edit' ? page : 1);
-      if (selectedApp?.app_code === saved?.app_code) {
-        setSelectedApp({ ...selectedApp, ...saved });
+      if (configuringApp?.app_code === saved?.app_code) {
+        const nextApp = { ...configuringApp, ...payload, ...saved };
+        setConfiguringApp(nextApp);
+        setConfigureDraftApp((current) =>
+          current?.app_code === saved.app_code
+            ? { ...current, ...payload, ...saved }
+            : current,
+        );
       }
-      if (saved?.app_code) {
+      if (saved?.app_code && modalMode === 'create') {
         openConfigure(saved);
       }
     } catch (err) {
@@ -3012,23 +4268,58 @@ export default function Applications() {
     }
   };
 
-  const operateApp = async (app: DbgptApp) => {
-    if (!isPublished(app) && !getAppCompleteness(app)) {
-      message.warning('Complete application configuration before publishing.');
-      openConfigure(app);
-      return;
+  const persistConfiguration = async (
+    app: DbgptApp,
+    options?: { silent?: boolean },
+  ) => {
+    const values = await configureForm.validateFields();
+    validateConfiguredResources(app, values, resourceParamSchemas);
+    const payload = buildConfigurePayload(
+      app,
+      values,
+      catalog,
+      resourceParamSchemas,
+    );
+    await fetchDbgpt<boolean>('/api/v1/app/edit', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    const saved = await fetchAppInfo({ ...app, ...payload });
+    const nextApp = {
+      ...app,
+      ...payload,
+      ...saved,
+      details: payload.details ?? saved.details ?? app.details,
+      team_context:
+        payload.team_context ?? saved.team_context ?? app.team_context,
+      param_need: payload.param_need ?? saved.param_need ?? app.param_need,
+      recommend_questions:
+        payload.recommend_questions ??
+        saved.recommend_questions ??
+        app.recommend_questions,
+    };
+    setConfiguringApp((current) =>
+      current?.app_code === nextApp.app_code ? nextApp : current,
+    );
+    setConfigureDraftApp(nextApp);
+    setConfigureDirty(false);
+    if (!options?.silent) {
+      message.success('Application configuration saved.');
     }
-    if (
-      !isPublished(app) &&
-      configuringApp?.app_code === app.app_code &&
-      ['single_agent', 'auto_plan'].includes(configuringApp.team_mode || '')
-    ) {
+    await loadApps(page);
+    return nextApp;
+  };
+
+  const operateApp = async (app: DbgptApp) => {
+    let targetApp = app;
+    if (!isPublished(app) && configuringApp?.app_code === app.app_code) {
       try {
-        const values = await configureForm.validateFields();
-        validateConfiguredResources(
-          configuringApp,
-          values,
-          resourceParamSchemas,
+        setSavingConfig(true);
+        targetApp = await persistConfiguration(
+          configureDraftApp || configuringApp,
+          {
+            silent: true,
+          },
         );
       } catch (err) {
         message.error(
@@ -3036,33 +4327,44 @@ export default function Applications() {
             ? err.message
             : 'Complete application configuration before publishing.',
         );
+        setSavingConfig(false);
         return;
+      } finally {
+        setSavingConfig(false);
       }
+    }
+
+    if (!isPublished(targetApp) && !canPublishApp(targetApp)) {
+      const blockingGaps = getBlockingGaps(targetApp);
+      message.warning(
+        blockingGaps[0] ||
+          'Complete application configuration before publishing.',
+      );
+      openConfigure(targetApp);
+      return;
     }
     const published = isPublished(app);
     const operation = published ? 'unpublish' : 'publish';
-    setActionLoading(`${operation}:${app.app_code}`);
+    setActionLoading(`${operation}:${targetApp.app_code}`);
     try {
       await fetchDbgpt(`/api/v1/app/${operation}`, {
         method: 'POST',
-        body: JSON.stringify({ app_code: app.app_code }),
+        body: JSON.stringify({ app_code: targetApp.app_code }),
       });
       message.success(
         published ? 'Application unpublished.' : 'Application published.',
       );
       const nextPublished = published ? 'false' : 'true';
       await loadApps(page);
-      if (selectedApp?.app_code === app.app_code) {
-        setSelectedApp({ ...selectedApp, published: nextPublished });
-      }
-      if (configuringApp?.app_code === app.app_code) {
-        setConfiguringApp({ ...configuringApp, published: nextPublished });
-      }
-      if (chatSession?.app.app_code === app.app_code) {
-        setChatSession({
-          ...chatSession,
-          app: { ...chatSession.app, published: nextPublished },
-        });
+      if (configuringApp?.app_code === targetApp.app_code) {
+        const nextApp = {
+          ...configuringApp,
+          ...targetApp,
+          published: nextPublished,
+        };
+        setConfiguringApp(nextApp);
+        setConfigureDraftApp(nextApp);
+        setConfigureDirty(false);
       }
     } catch (err) {
       message.error(
@@ -3077,20 +4379,7 @@ export default function Applications() {
     if (!configuringApp) return;
     setSavingConfig(true);
     try {
-      const values = await configureForm.validateFields();
-      validateConfiguredResources(configuringApp, values, resourceParamSchemas);
-      const payload = buildConfigurePayload(configuringApp, values, catalog);
-      const saved = await fetchDbgpt<DbgptApp>('/api/v1/app/edit', {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      });
-      const nextApp = { ...configuringApp, ...payload, ...saved };
-      setConfiguringApp(nextApp);
-      setSelectedApp((current) =>
-        current?.app_code === nextApp.app_code ? nextApp : current,
-      );
-      message.success('Application configuration saved.');
-      await loadApps(page);
+      await persistConfiguration(configureDraftApp || configuringApp);
     } catch (err) {
       message.error(
         err instanceof Error
@@ -3110,12 +4399,11 @@ export default function Applications() {
         body: JSON.stringify({ app_code: app.app_code }),
       });
       message.success('Application deleted.');
-      if (selectedApp?.app_code === app.app_code) {
-        setDetailsOpen(false);
-        setSelectedApp(null);
-      }
-      if (chatSession?.app.app_code === app.app_code) {
-        setChatSession(null);
+      if (configuringApp?.app_code === app.app_code) {
+        setConfiguringApp(null);
+        setConfigureDraftApp(null);
+        setConfigureDirty(false);
+        clearApplicationUrlState();
       }
       await loadApps(page);
     } catch (err) {
@@ -3140,6 +4428,7 @@ export default function Applications() {
 
   const renderAppMenu = (app: DbgptApp) => {
     const published = isPublished(app);
+    const callable = getAppRuntimeReady(app) && published;
     return (
       <Menu
         onClick={(info) => {
@@ -3147,38 +4436,35 @@ export default function Applications() {
           if (info.key === 'chat') startChat(app);
           if (info.key === 'share') copyAppShareLink(app);
           if (info.key === 'dingtalk') copyDingTalkShareLink(app);
-          if (info.key === 'details') openDetails(app);
           if (info.key === 'configure') openConfigure(app);
           if (info.key === 'edit') openEditModal(app);
           if (info.key === 'publish') operateApp(app);
           if (info.key === 'delete') confirmDelete(app);
         }}
       >
-        <Menu.Item
-          key="chat"
-          icon={<SendOutlined />}
-          disabled={!published || !getAppCompleteness(app)}
-        >
+        <Menu.Item key="chat" icon={<SendOutlined />} disabled={!callable}>
           Chat
         </Menu.Item>
-        <Menu.Item key="share" icon={<ShareAltOutlined />}>
+        <Menu.Item key="share" icon={<ShareAltOutlined />} disabled={!callable}>
           Copy app link
         </Menu.Item>
-        <Menu.Item key="dingtalk" icon={<ShareAltOutlined />}>
+        <Menu.Item
+          key="dingtalk"
+          icon={<ShareAltOutlined />}
+          disabled={!callable}
+        >
           Copy DingTalk link
         </Menu.Item>
-        <Menu.Item key="details" icon={<AppstoreOutlined />}>
-          Runtime details
-        </Menu.Item>
-        <Menu.Item key="configure" icon={<RocketOutlined />}>
+        <Menu.Item key="configure" icon={<AppstoreOutlined />}>
           Configure
         </Menu.Item>
         <Menu.Item key="edit" icon={<EditOutlined />}>
-          Edit
+          Edit base info
         </Menu.Item>
         <Menu.Item
           key="publish"
           icon={published ? <StopOutlined /> : <RocketOutlined />}
+          disabled={!published && !canPublishApp(app)}
         >
           {published ? 'Unpublish' : 'Publish'}
         </Menu.Item>
@@ -3190,31 +4476,21 @@ export default function Applications() {
     );
   };
 
-  if (chatSession) {
-    return (
-      <ApplicationChatView
-        session={chatSession}
-        teamModes={teamModes}
-        actionLoading={actionLoading}
-        onBack={() => {
-          setChatSession(null);
-          clearApplicationUrlState();
-        }}
-        onConfigure={openConfigure}
-        onOperate={operateApp}
-        onCopyShareLink={copyAppShareLink}
-      />
-    );
-  }
-
   if (configuringApp) {
-    const runnable = getAppCompleteness(configuringApp);
+    const previewApp = configureDraftApp || configuringApp;
+    const callable =
+      getAppRuntimeReady(previewApp) &&
+      isPublished(configuringApp) &&
+      !configureDirty;
+    const operation = isPublished(configuringApp) ? 'unpublish' : 'publish';
+    const publishDisabled =
+      !isPublished(configuringApp) && !canPublishApp(previewApp);
     return (
       <ConstructLayout
         activeKey="applications"
         icon={<AppstoreOutlined />}
-        title="Applications"
-        description="Configure the selected application without leaving WrenUI."
+        title={configuringApp.app_name || 'Application'}
+        description="Bind real runtime resources, publish lightweight resource apps, or publish a workflow that composes multiple resources into one application."
         loading={catalogLoading}
         actions={
           <>
@@ -3222,7 +4498,8 @@ export default function Applications() {
               icon={<LeftOutlined />}
               onClick={() => {
                 setConfiguringApp(null);
-                setChatSession(null);
+                setConfigureDraftApp(null);
+                setConfigureDirty(false);
                 clearApplicationUrlState();
                 configureForm.resetFields();
               }}
@@ -3234,7 +4511,31 @@ export default function Applications() {
               loading={savingConfig}
               onClick={saveConfiguration}
             >
-              Save configuration
+              Save
+            </Button>
+            <Button
+              icon={
+                isPublished(configuringApp) ? (
+                  <StopOutlined />
+                ) : (
+                  <RocketOutlined />
+                )
+              }
+              loading={
+                actionLoading === `${operation}:${configuringApp.app_code}`
+              }
+              disabled={publishDisabled}
+              onClick={() => operateApp(configuringApp)}
+            >
+              {isPublished(configuringApp) ? 'Unpublish' : 'Publish'}
+            </Button>
+            <Button
+              icon={<SendOutlined />}
+              disabled={!callable}
+              loading={actionLoading === `chat:${configuringApp.app_code}`}
+              onClick={() => startChat(configuringApp)}
+            >
+              Run
             </Button>
           </>
         }
@@ -3242,9 +4543,7 @@ export default function Applications() {
         <ConfigureShell>
           <ConfigureHeader>
             <ConfigureTitle>
-              <AppIcon>
-                <ForkOutlined />
-              </AppIcon>
+              <AppIcon>{getAppIcon(configuringApp.team_mode)}</AppIcon>
               <div style={{ minWidth: 0 }}>
                 <Title level={4} className="mb-0">
                   {configuringApp.app_name}
@@ -3256,7 +4555,7 @@ export default function Applications() {
                       isPublished(configuringApp) ? 'published' : 'unpublished'
                     }
                   />
-                  <Tag color={runnable ? 'green' : 'orange'}>
+                  <Tag color={getActionTagColor(configuringApp)}>
                     {getAppActionHint(configuringApp)}
                   </Tag>
                 </AppMeta>
@@ -3277,12 +4576,33 @@ export default function Applications() {
                     <RocketOutlined />
                   )
                 }
+                loading={
+                  actionLoading === `${operation}:${configuringApp.app_code}`
+                }
+                disabled={publishDisabled}
                 onClick={() => operateApp(configuringApp)}
               >
                 {isPublished(configuringApp) ? 'Unpublish' : 'Publish'}
               </Button>
+              <Button
+                icon={<ShareAltOutlined />}
+                disabled={!callable}
+                onClick={() => copyAppShareLink(configuringApp)}
+              >
+                Copy link
+              </Button>
             </FooterActions>
           </ConfigureHeader>
+          <ApplicationBuildSteps app={previewApp} teamModes={teamModes} />
+          {configureDirty && (
+            <Alert
+              className="mt-4"
+              type="info"
+              showIcon
+              message="Configuration changes are not saved yet"
+              description="Save configuration before publishing or opening the runtime. DB-GPT chat uses the last saved application record."
+            />
+          )}
 
           {catalogError && (
             <Alert
@@ -3304,36 +4624,72 @@ export default function Applications() {
             layout="vertical"
             requiredMark={false}
             initialValues={buildConfigureInitialValues(configuringApp)}
+            onValuesChange={updateConfigureDraft}
           >
             <ConfigureContent>
-              <div>
-                {['single_agent', 'auto_plan'].includes(
-                  configuringApp.team_mode || '',
-                ) && (
-                  <AgentConfiguration
-                    app={configuringApp}
-                    catalog={catalog}
-                    resourceParamSchemas={resourceParamSchemas}
-                    resourceParamLoading={resourceParamLoading}
-                    onLoadParamSchema={loadResourceParamSchema}
-                  />
-                )}
-                {configuringApp.team_mode === 'awel_layout' && (
-                  <AwelConfiguration catalog={catalog} />
-                )}
-                {configuringApp.team_mode === 'native_app' && (
-                  <NativeConfiguration
-                    catalog={catalog}
-                    resourceOptions={resourceOptions}
-                    resourceLoading={resourceLoading}
-                    onLoadOptions={loadResourceOptions}
-                  />
-                )}
-                <div className="mt-4">
+              <BuilderGrid>
+                <BuilderMain>
+                  <BuilderIntro>
+                    <BuilderIntroHeader>
+                      <div>
+                        <Title level={5} className="mb-0">
+                          {getModeConfigurationTarget(
+                            configuringApp.team_mode,
+                          )}
+                        </Title>
+                        <Text className="gray-7">
+                          Database, knowledge, and tool resources can be
+                          published directly as lightweight apps. Workflow
+                          mode publishes a compound app after the Workflow page
+                          composes multiple resources.
+                        </Text>
+                      </div>
+                      <Tag>
+                        {getModeLabel(configuringApp.team_mode, teamModes)}
+                      </Tag>
+                    </BuilderIntroHeader>
+                  </BuilderIntro>
+
+                  {['single_agent', 'auto_plan'].includes(
+                    configuringApp.team_mode || '',
+                  ) && (
+                    <AgentConfiguration
+                      app={configuringApp}
+                      catalog={catalog}
+                      resourceParamSchemas={resourceParamSchemas}
+                      resourceParamLoading={resourceParamLoading}
+                      resourceOptions={resourceOptions}
+                      resourceLoading={resourceLoading}
+                      onLoadParamSchema={loadResourceParamSchema}
+                      onLoadOptions={loadResourceOptions}
+                      onValuesMutated={updateConfigureDraft}
+                    />
+                  )}
+                  {configuringApp.team_mode === 'awel_layout' && (
+                    <AwelConfiguration catalog={catalog} />
+                  )}
+                  {configuringApp.team_mode === 'native_app' && (
+                    <NativeConfiguration
+                      catalog={catalog}
+                      resourceOptions={resourceOptions}
+                      resourceLoading={resourceLoading}
+                      onLoadOptions={loadResourceOptions}
+                    />
+                  )}
                   <RecommendQuestionsEditor />
-                </div>
-              </div>
-              <RunApplicationPanel app={configuringApp} disabled={!runnable} />
+                </BuilderMain>
+                <BuilderAside>
+                  <ApplicationLifecyclePanel
+                    app={previewApp}
+                    teamModes={teamModes}
+                  />
+                  <ApplicationConfigNotice app={previewApp} />
+                  <ApplicationInvocationPanel
+                    app={previewApp}
+                    dirty={configureDirty}
+                  />
+                </BuilderAside>
+              </BuilderGrid>
             </ConfigureContent>
           </Form>
         </ConfigureShell>
@@ -3346,7 +4702,7 @@ export default function Applications() {
       activeKey="applications"
       icon={<AppstoreOutlined />}
       title="Applications"
-      description="Create, configure, publish, and chat with DB-GPT applications inside this workspace."
+      description="Create DB-GPT applications locally in VeADK, configure their work mode, publish them, then expose chat and API invocation."
       loading={loading && apps.length === 0}
       actions={
         <Button
@@ -3354,7 +4710,7 @@ export default function Applications() {
           icon={<PlusOutlined />}
           onClick={openCreateModal}
         >
-          Create app
+          Create application
         </Button>
       }
     >
@@ -3366,7 +4722,10 @@ export default function Applications() {
                 key={option.value}
                 size="small"
                 type={activeKey === option.value ? 'primary' : 'default'}
-                onClick={() => setActiveKey(option.value)}
+                onClick={() => {
+                  setActiveKey(option.value);
+                  setPage(1);
+                }}
               >
                 {option.label}
               </Button>
@@ -3395,14 +4754,14 @@ export default function Applications() {
         ) : apps.length === 0 ? (
           <ConstructEmpty
             title="No applications"
-            description="Create a DB-GPT application, configure its work mode, then publish it before users can chat."
+            description="Create a DB-GPT application, configure its work mode, then publish it before users can run it."
             action={
               <Button
                 type="primary"
                 icon={<PlusOutlined />}
                 onClick={openCreateModal}
               >
-                Create app
+                Create application
               </Button>
             }
           />
@@ -3411,8 +4770,15 @@ export default function Applications() {
             <AppGrid>
               {apps.map((app) => {
                 const published = isPublished(app);
-                const publishKey = `${published ? 'unpublish' : 'publish'}:${app.app_code}`;
-                const runnable = getAppCompleteness(app);
+                const callable = getAppRuntimeReady(app) && published;
+                const canPublishFromCard = !published && canPublishApp(app);
+                const runtimeStatus = getApplicationRuntimeStatus(app);
+                const bindings = getApplicationResourceBindings(app);
+                const appUrl = getApplicationShareUrl(app);
+                const questions = getRecommendQuestions(app)
+                  .filter((item) => item.valid !== false && item.question)
+                  .slice(0, 2);
+                const updatedAt = getDisplayDate(app.updated_at);
                 return (
                   <AppCard
                     key={app.app_code}
@@ -3421,25 +4787,25 @@ export default function Applications() {
                     tabIndex={0}
                     onClick={() => openConfigure(app)}
                     onKeyDown={(event) => {
-                      if (event.key === 'Enter') openConfigure(app);
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        openConfigure(app);
+                      }
                     }}
                   >
                     <AppHeader>
-                      <AppIcon>
-                        <ForkOutlined />
-                      </AppIcon>
+                      <AppIcon>{getAppIcon(app.team_mode)}</AppIcon>
                       <div style={{ minWidth: 0 }}>
                         <AppTitle>{app.app_name}</AppTitle>
                         <AppMeta>
-                          {app.language && <Tag>{app.language}</Tag>}
                           {app.team_mode && (
                             <Tag>{getModeLabel(app.team_mode, teamModes)}</Tag>
                           )}
                           <StatusTag
                             status={published ? 'published' : 'unpublished'}
                           />
-                          <Tag color={runnable ? 'green' : 'orange'}>
-                            {getAppActionHint(app)}
+                          <Tag color={getRuntimeStatusColor(runtimeStatus)}>
+                            {runtimeStatus.label}
                           </Tag>
                         </AppMeta>
                       </div>
@@ -3450,37 +4816,81 @@ export default function Applications() {
                     >
                       {app.app_describe || 'No description.'}
                     </Paragraph>
+
+                    <CardSection>
+                      <DetailLabel>Bound resources</DetailLabel>
+                      {bindings.length ? (
+                        <MiniResourceList>
+                          {bindings.slice(0, 3).map((binding) => (
+                            <MiniResourceItem key={binding.key}>
+                              <ResourceIcon>{getResourceIcon(binding.type)}</ResourceIcon>
+                              <div style={{ minWidth: 0 }}>
+                                <Text strong ellipsis>
+                                  {binding.label}
+                                </Text>
+                                <DetailLabel>{binding.owner}</DetailLabel>
+                              </div>
+                              <Tag style={{ marginRight: 0 }}>{binding.type}</Tag>
+                            </MiniResourceItem>
+                          ))}
+                        </MiniResourceList>
+                      ) : (
+                        <Alert
+                          type="info"
+                          showIcon
+                          message="No resources bound"
+                        />
+                      )}
+                    </CardSection>
+
+                    <CardSection>
+                      <RuntimeLine>
+                        <ShareAltOutlined />
+                        <Text ellipsis copyable={callable ? { text: appUrl } : false}>
+                          {callable ? appUrl : 'Publish to create a runtime entry'}
+                        </Text>
+                      </RuntimeLine>
+                      <RuntimeLine>
+                        <RocketOutlined />
+                        <Text ellipsis>
+                          {runtimeStatus.detail || getAppActionHint(app)}
+                        </Text>
+                      </RuntimeLine>
+                    </CardSection>
+
+                    {questions.length > 0 && (
+                      <CardSection>
+                        <DetailLabel>Recommended questions</DetailLabel>
+                        <QuestionChips>
+                          {questions.map((item) => (
+                            <Tag key={item.question}>{item.question}</Tag>
+                          ))}
+                        </QuestionChips>
+                      </CardSection>
+                    )}
+
                     <AppFooter>
                       <Text className="gray-7 text-sm">
                         {app.owner_name || 'owner unset'}
-                        {app.updated_at ? ` · ${app.updated_at}` : ''}
+                        {updatedAt ? ` · ${updatedAt}` : ''}
                       </Text>
                       <FooterActions>
                         <Button
                           size="small"
                           type="primary"
                           icon={<SendOutlined />}
+                          disabled={!callable}
                           loading={actionLoading === `chat:${app.app_code}`}
-                          disabled={!published || !runnable}
                           onClick={(event) => {
                             event.stopPropagation();
                             startChat(app);
                           }}
                         >
-                          Chat
+                          Start
                         </Button>
                         <Button
                           size="small"
-                          icon={<ShareAltOutlined />}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            copyAppShareLink(app);
-                          }}
-                        >
-                          Share
-                        </Button>
-                        <Button
-                          size="small"
+                          icon={<AppstoreOutlined />}
                           onClick={(event) => {
                             event.stopPropagation();
                             openConfigure(app);
@@ -3490,7 +4900,13 @@ export default function Applications() {
                         </Button>
                         <Button
                           size="small"
-                          loading={actionLoading === publishKey}
+                          icon={published ? <StopOutlined /> : <RocketOutlined />}
+                          disabled={!published && !canPublishFromCard}
+                          loading={
+                            actionLoading === `${
+                              published ? 'unpublish' : 'publish'
+                            }:${app.app_code}`
+                          }
                           onClick={(event) => {
                             event.stopPropagation();
                             operateApp(app);
@@ -3528,32 +4944,20 @@ export default function Applications() {
         )}
       </Spin>
 
-      <ApplicationModal
-        open={modalOpen}
-        mode={modalMode}
-        app={editingApp}
-        teamModes={teamModes}
-        teamModesLoading={teamModesLoading}
-        teamModeError={teamModeError}
-        submitting={submitting}
-        onCancel={() => setModalOpen(false)}
-        onRetryTeamModes={loadTeamModes}
-        onSubmit={submitApp}
-      />
-      <ApplicationDetailsDrawer
-        app={selectedApp}
-        open={detailsOpen}
-        loading={detailsLoading}
-        teamModes={teamModes}
-        actionLoading={actionLoading}
-        onClose={() => setDetailsOpen(false)}
-        onChat={startChat}
-        onCopyShareLink={copyAppShareLink}
-        onEdit={openEditModal}
-        onConfigure={openConfigure}
-        onOperate={operateApp}
-        onDelete={confirmDelete}
-      />
+      {modalOpen && (
+        <ApplicationModal
+          open={modalOpen}
+          mode={modalMode}
+          app={editingApp}
+          teamModes={teamModes}
+          teamModesLoading={teamModesLoading}
+          teamModeError={teamModeError}
+          submitting={submitting}
+          onCancel={() => setModalOpen(false)}
+          onRetryTeamModes={loadTeamModes}
+          onSubmit={submitApp}
+        />
+      )}
     </ConstructLayout>
   );
 }
