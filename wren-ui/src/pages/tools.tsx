@@ -7,6 +7,7 @@ import {
   Input,
   Modal,
   Popconfirm,
+  Radio,
   Select,
   Spin,
   Tag,
@@ -48,13 +49,17 @@ type StatusFilter = 'all' | 'active' | 'inactive' | 'attention';
 
 type GridItem =
   | { kind: 'template'; template: ConnectorCatalogEntry; instanceCount: number }
-  | { kind: 'instance'; instance: ConnectorInstance; template?: ConnectorCatalogEntry };
+  | {
+      kind: 'instance';
+      instance: ConnectorInstance;
+      template?: ConnectorCatalogEntry;
+    };
 
 type FormValues = {
   connector_type: string;
   display_name: string;
-  description?: string;
-  credentials?: Record<string, string>;
+  server_uri?: string;
+  fields?: Record<string, string>;
 };
 
 type BrandToken = {
@@ -67,6 +72,75 @@ const attentionStatuses = new Set<ConnectorStatus>([
   'error',
   'needs_reactivation',
 ]);
+
+const CONNECTOR_CONFIG_FIELDS = new Set([
+  'server_uri',
+  'transport',
+  'auth_type',
+  'header_name',
+  'description',
+]);
+
+const CUSTOM_RENDERED_FIELDS = new Set([
+  'server_uri',
+  'transport',
+  'description',
+]);
+
+const TRANSPORT_META: Record<
+  string,
+  { label: string; placeholder: string; description: string }
+> = {
+  streamable_http: {
+    label: 'Streamable HTTP endpoint',
+    placeholder: 'https://your-mcp-server/mcp',
+    description: 'Use this for modern hosted MCP servers.',
+  },
+  sse: {
+    label: 'SSE endpoint',
+    placeholder: 'http://your-mcp-server/sse',
+    description: 'Use this for legacy SSE MCP servers.',
+  },
+};
+
+const CUSTOM_MCP_TEMPLATE: ConnectorCatalogEntry = {
+  type: 'custom_mcp',
+  display_name: 'Custom MCP',
+  description: 'Connect any Streamable HTTP or SSE MCP server.',
+  category: 'custom',
+  is_custom: true,
+  auth_fields: [
+    {
+      name: 'transport',
+      label: 'Transport',
+      type: 'select',
+      required: true,
+      options: ['streamable_http', 'sse'],
+      default: 'streamable_http',
+    },
+    {
+      name: 'auth_type',
+      label: 'Authentication',
+      type: 'select',
+      required: true,
+      options: ['none', 'bearer', 'token'],
+      default: 'none',
+    },
+    {
+      name: 'token',
+      label: 'Token',
+      type: 'password',
+      required: true,
+    },
+    {
+      name: 'header_name',
+      label: 'Header name',
+      type: 'text',
+      required: true,
+      default: 'Authorization',
+    },
+  ],
+};
 
 const STATUS_META: Record<
   ConnectorStatus,
@@ -174,7 +248,9 @@ const ConnectorCardShell = styled.div<{
     ${(props) => (props.$template ? '#cbd5e1' : 'rgba(226, 232, 240, 0.96)')};
   border-radius: 12px;
   background: ${(props) =>
-    props.$template ? 'rgba(255, 255, 255, 0.58)' : 'rgba(255, 255, 255, 0.88)'};
+    props.$template
+      ? 'rgba(255, 255, 255, 0.58)'
+      : 'rgba(255, 255, 255, 0.88)'};
   box-shadow: 0 8px 26px rgba(15, 23, 42, 0.06);
   cursor: ${(props) => (props.$interactive ? 'pointer' : 'default')};
   transition:
@@ -352,8 +428,7 @@ const ToolButton = styled.button<{ $active?: boolean }>`
   border: 0;
   border-radius: 8px;
   background: ${(props) => (props.$active ? '#f5f3ff' : 'transparent')};
-  box-shadow: ${(props) =>
-    props.$active ? 'inset 3px 0 0 #7c3aed' : 'none'};
+  box-shadow: ${(props) => (props.$active ? 'inset 3px 0 0 #7c3aed' : 'none')};
   text-align: left;
   cursor: pointer;
 
@@ -382,6 +457,13 @@ const TypeChip = styled.span`
 
 const brandFor = (type: string) => BRAND_TOKENS[type] || FALLBACK_BRAND;
 const unwrapList = <T,>(value: T[] | undefined) => value || [];
+
+const withCustomMcpTemplate = (items: ConnectorCatalogEntry[]) => {
+  const hasCustomMcp = items.some(
+    (item) => item.type === CUSTOM_MCP_TEMPLATE.type,
+  );
+  return hasCustomMcp ? items : [CUSTOM_MCP_TEMPLATE, ...items];
+};
 
 const filterOptions: Array<{ label: string; value: StatusFilter }> = [
   { label: 'All', value: 'all' },
@@ -413,14 +495,15 @@ function ConnectorCard({
     : item.instance.display_name;
   const category = isTemplate
     ? item.template.category
-    : item.template?.category || (item.instance.is_custom ? 'custom' : 'project');
+    : item.template?.category ||
+      (item.instance.is_custom ? 'custom' : 'project');
   const description = isTemplate
     ? item.template.description || 'Connector template.'
-    : ((item.instance.config?.description as string) ||
-        (item.instance.connector_type === 'custom_mcp'
-          ? ''
-          : item.template?.description) ||
-        '');
+    : (item.instance.config?.description as string) ||
+      (item.instance.connector_type === 'custom_mcp'
+        ? ''
+        : item.template?.description) ||
+      '';
 
   return (
     <ConnectorCardShell
@@ -619,7 +702,9 @@ function ConnectorToolsModal({
         <ToolsSidebar>
           <div className="p-4 border-bottom">
             <div className="d-flex align-center gx-3">
-              <BrandTile $gradient={brandFor(connector?.connector_type || '').gradient}>
+              <BrandTile
+                $gradient={brandFor(connector?.connector_type || '').gradient}
+              >
                 <ThunderboltFilled />
               </BrandTile>
               <div style={{ minWidth: 0 }}>
@@ -747,7 +832,13 @@ function ToolDetail({
       {argEntries.length === 0 ? (
         <div className="gray-7 text-sm">No parameters.</div>
       ) : (
-        <div style={{ overflow: 'hidden', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+        <div
+          style={{
+            overflow: 'hidden',
+            border: '1px solid #e2e8f0',
+            borderRadius: 8,
+          }}
+        >
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ background: '#f8fafc', color: '#64748b' }}>
@@ -760,7 +851,9 @@ function ToolDetail({
             <tbody>
               {argEntries.map(([name, info]) => (
                 <tr key={name} style={{ borderTop: '1px solid #e2e8f0' }}>
-                  <td style={{ padding: 10, fontFamily: 'monospace' }}>{name}</td>
+                  <td style={{ padding: 10, fontFamily: 'monospace' }}>
+                    {name}
+                  </td>
                   <td style={{ padding: 10 }}>
                     <TypeChip>{(info as any)?.type || 'any'}</TypeChip>
                   </td>
@@ -771,7 +864,9 @@ function ToolDetail({
                       <span className="gray-6">no</span>
                     )}
                   </td>
-                  <td style={{ padding: 10 }}>{(info as any)?.description || '-'}</td>
+                  <td style={{ padding: 10 }}>
+                    {(info as any)?.description || '-'}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -792,18 +887,22 @@ export default function Tools() {
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<ConnectorInstance | null>(null);
   const [prefilledType, setPrefilledType] = useState<string | undefined>();
-  const [toolsConnector, setToolsConnector] = useState<ConnectorInstance | null>(
-    null,
-  );
+  const [toolsConnector, setToolsConnector] =
+    useState<ConnectorInstance | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [error, setError] = useState<string | null>(null);
 
   const selectedType = Form.useWatch('connector_type', form);
+  const watchedFields = Form.useWatch('fields', form) || {};
+  const selectedTransport = watchedFields.transport || 'streamable_http';
+  const selectedAuthType = watchedFields.auth_type;
   const selectedTemplate = useMemo(
     () => catalog.find((item) => item.type === selectedType),
     [catalog, selectedType],
   );
+  const transportMeta =
+    TRANSPORT_META[selectedTransport] || TRANSPORT_META.streamable_http;
 
   const loadCatalog = async () => {
     setCatalogLoading(true);
@@ -811,7 +910,10 @@ export default function Tools() {
       const data = await fetchDbgpt<ConnectorCatalogEntry[]>(
         '/api/v2/serve/connectors/types',
       );
-      setCatalog(data || []);
+      setCatalog(withCustomMcpTemplate(data || []));
+    } catch (err) {
+      setCatalog(withCustomMcpTemplate([]));
+      throw err;
     } finally {
       setCatalogLoading(false);
     }
@@ -834,9 +936,14 @@ export default function Tools() {
   };
 
   useEffect(() => {
-    Promise.all([loadCatalog(), loadConnectors()]).catch((err) => {
-      setError(err instanceof Error ? err.message : 'Unable to load tools.');
+    loadCatalog().catch((err) => {
+      message.warning(
+        err instanceof Error
+          ? `Connector catalog unavailable: ${err.message}`
+          : 'Connector catalog unavailable.',
+      );
     });
+    loadConnectors();
   }, []);
 
   const catalogByType = useMemo(() => {
@@ -852,8 +959,14 @@ export default function Tools() {
 
   const gridItems = useMemo<GridItem[]>(() => {
     const templates = catalog
-      .filter((template) => template.type !== 'custom_mcp')
-      .filter((template) => !instanceCountByType[template.type])
+      .filter(
+        (template) =>
+          template.type === 'custom_mcp' || !instanceCountByType[template.type],
+      )
+      .sort(
+        (a, b) =>
+          Number(b.type === 'custom_mcp') - Number(a.type === 'custom_mcp'),
+      )
       .map((template) => ({
         kind: 'template' as const,
         template,
@@ -894,13 +1007,21 @@ export default function Tools() {
   }, [gridItems, search, statusFilter]);
 
   const openCreate = (type?: string) => {
+    const template =
+      catalog.find((item) => item.type === type) ||
+      (type === CUSTOM_MCP_TEMPLATE.type ? CUSTOM_MCP_TEMPLATE : undefined);
     setEditing(null);
     setPrefilledType(type);
     form.resetFields();
     form.setFieldsValue({
       connector_type: type,
-      display_name: '',
-      credentials: {},
+      display_name:
+        template && template.is_custom !== true ? template.display_name : '',
+      server_uri: '',
+      fields: {
+        transport: 'streamable_http',
+        auth_type: 'none',
+      },
     });
     setFormOpen(true);
   };
@@ -912,20 +1033,82 @@ export default function Tools() {
     form.setFieldsValue({
       connector_type: connector.connector_type,
       display_name: connector.display_name,
-      description: connector.config?.description as string,
-      credentials: {},
+      server_uri: String(connector.config?.server_uri || ''),
+      fields: Object.entries(connector.config || {}).reduce<
+        Record<string, string>
+      >(
+        (acc, [key, value]) => {
+          if (key !== 'server_uri' && value != null) acc[key] = String(value);
+          return acc;
+        },
+        {
+          transport: 'streamable_http',
+          auth_type: 'none',
+        },
+      ),
     });
     setFormOpen(true);
   };
 
+  useEffect(() => {
+    if (!selectedTemplate || editing) return;
+    const currentFields = form.getFieldValue('fields') || {};
+    const nextFields = {
+      transport: 'streamable_http',
+      auth_type: 'none',
+      ...currentFields,
+    };
+    selectedTemplate.auth_fields?.forEach((field) => {
+      if (
+        field.default !== undefined &&
+        (nextFields[field.name] === undefined || nextFields[field.name] === '')
+      ) {
+        nextFields[field.name] = field.default;
+      }
+    });
+    if (
+      selectedTemplate.description &&
+      selectedTemplate.is_custom !== true &&
+      !nextFields.description
+    ) {
+      nextFields.description = selectedTemplate.description;
+    }
+    form.setFieldsValue({
+      fields: nextFields,
+      display_name:
+        form.getFieldValue('display_name') ||
+        (selectedTemplate.is_custom !== true
+          ? selectedTemplate.display_name
+          : ''),
+    });
+  }, [editing, form, selectedTemplate]);
+
   const handleSubmit = async (values: FormValues) => {
     setSubmitting(true);
     try {
+      const fields = values.fields || {};
+      const credentials: Record<string, string> = {};
+      const config: Record<string, unknown> = {};
+      if (values.server_uri) config.server_uri = values.server_uri;
+      if (fields.transport) config.transport = fields.transport;
+      if (fields.description) config.description = fields.description;
+
+      selectedTemplate?.auth_fields?.forEach((field) => {
+        if (CUSTOM_RENDERED_FIELDS.has(field.name)) return;
+        const value = fields[field.name];
+        if (value === undefined || value === '') return;
+        if (CONNECTOR_CONFIG_FIELDS.has(field.name)) {
+          config[field.name] = value;
+        } else {
+          credentials[field.name] = value;
+        }
+      });
+
       const payload = {
         connector_type: values.connector_type,
         display_name: values.display_name,
-        credentials: values.credentials || {},
-        config: values.description ? { description: values.description } : {},
+        credentials,
+        config,
       };
       if (editing) {
         await fetchDbgpt(`/api/v2/serve/connectors/${editing.id}`, {
@@ -984,14 +1167,26 @@ export default function Tools() {
   };
 
   const renderAuthField = (field: ConnectorAuthField) => {
-    const name = ['credentials', field.name];
+    if (CUSTOM_RENDERED_FIELDS.has(field.name)) return null;
+    if (
+      field.name === 'token' &&
+      !['bearer', 'token'].includes(selectedAuthType || 'none')
+    ) {
+      return null;
+    }
+    if (field.name === 'header_name' && selectedAuthType !== 'token') {
+      return null;
+    }
+    const name = ['fields', field.name];
+    const fieldRequired =
+      field.required && !(Boolean(editing) && field.type === 'password');
     if (field.type === 'select') {
       return (
         <Form.Item
           key={field.name}
           label={field.label}
           name={name}
-          rules={[{ required: field.required }]}
+          rules={[{ required: fieldRequired }]}
           initialValue={field.default}
         >
           <Select>
@@ -1009,7 +1204,7 @@ export default function Tools() {
         key={field.name}
         label={field.label}
         name={name}
-        rules={[{ required: field.required }]}
+        rules={[{ required: fieldRequired }]}
         initialValue={field.default}
       >
         {field.type === 'password' ? (
@@ -1029,9 +1224,21 @@ export default function Tools() {
       description="Connectors"
       loading={(loading || catalogLoading) && gridItems.length === 0}
       actions={
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => openCreate()}>
-          Add connector
-        </Button>
+        <>
+          <Button
+            icon={<ApiOutlined />}
+            onClick={() => openCreate('custom_mcp')}
+          >
+            Custom MCP
+          </Button>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => openCreate()}
+          >
+            Add connector
+          </Button>
+        </>
       }
     >
       <ConstructToolbar
@@ -1072,7 +1279,11 @@ export default function Tools() {
             title="No connectors found"
             description="Add a connector or clear the current filter. This page does not display fake integrations."
             action={
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => openCreate()}>
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={() => openCreate()}
+              >
                 Add connector
               </Button>
             }
@@ -1114,11 +1325,17 @@ export default function Tools() {
             rules={[{ required: true }]}
           >
             <Select disabled={Boolean(prefilledType) || Boolean(editing)}>
-              {catalog.map((item) => (
-                <Select.Option value={item.type} key={item.type}>
-                  {item.display_name}
-                </Select.Option>
-              ))}
+              {[...catalog]
+                .sort(
+                  (a, b) =>
+                    Number(b.type === 'custom_mcp') -
+                    Number(a.type === 'custom_mcp'),
+                )
+                .map((item) => (
+                  <Select.Option value={item.type} key={item.type}>
+                    {item.display_name}
+                  </Select.Option>
+                ))}
             </Select>
           </Form.Item>
           <Form.Item
@@ -1128,7 +1345,45 @@ export default function Tools() {
           >
             <Input />
           </Form.Item>
-          <Form.Item label="Description" name="description">
+          {selectedType && (
+            <Form.Item
+              label="Transport"
+              name={['fields', 'transport']}
+              rules={[{ required: true }]}
+              initialValue="streamable_http"
+            >
+              <Radio.Group>
+                {(
+                  selectedTemplate?.auth_fields?.find(
+                    (field) => field.name === 'transport',
+                  )?.options || ['streamable_http', 'sse']
+                ).map((option) => (
+                  <Radio.Button value={option} key={option}>
+                    {option === 'streamable_http'
+                      ? 'Streamable HTTP'
+                      : option.toUpperCase()}
+                  </Radio.Button>
+                ))}
+              </Radio.Group>
+            </Form.Item>
+          )}
+          {selectedType && (
+            <Form.Item
+              label={transportMeta.label}
+              name="server_uri"
+              rules={[
+                { required: true, message: 'Please input MCP server URL.' },
+                {
+                  pattern: /^https?:\/\/.+/i,
+                  message: 'Server URL must start with http:// or https://.',
+                },
+              ]}
+              extra={transportMeta.description}
+            >
+              <Input placeholder={transportMeta.placeholder} />
+            </Form.Item>
+          )}
+          <Form.Item label="Description" name={['fields', 'description']}>
             <Input.TextArea rows={3} />
           </Form.Item>
           {selectedTemplate?.auth_fields?.map(renderAuthField)}

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import {
   Button,
+  Space,
   Form,
   Input,
   Modal,
@@ -19,6 +20,8 @@ import PlusOutlined from '@ant-design/icons/PlusOutlined';
 import ReadOutlined from '@ant-design/icons/ReadOutlined';
 import SearchOutlined from '@ant-design/icons/SearchOutlined';
 import ShareAltOutlined from '@ant-design/icons/ShareAltOutlined';
+import ClockCircleOutlined from '@ant-design/icons/ClockCircleOutlined';
+import RightOutlined from '@ant-design/icons/RightOutlined';
 import {
   ConstructCard,
   ConstructEmpty,
@@ -48,6 +51,18 @@ const indexMethodLabels: Record<string, string> = {
   VectorStore: 'Vector store',
   FullText: 'Full text',
   KnowledgeGraph: 'Knowledge graph',
+};
+
+const formatDate = (value?: string) => {
+  if (!value) return 'Not updated';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toISOString().slice(0, 10);
+};
+
+const getIndexStatus = (stats?: DbgptKnowledgeStats) => {
+  if (!stats?.sync_status && !stats?.graph_build_status) return 'Ready';
+  return stats.sync_status || stats.graph_build_status || 'Ready';
 };
 
 const getSpaceLogo = (space: DbgptKnowledgeSpace) => {
@@ -134,7 +149,9 @@ export default function Knowledge() {
       await loadSpaces();
     } catch (err) {
       message.error(
-        err instanceof Error ? err.message : 'Failed to create knowledge space.',
+        err instanceof Error
+          ? err.message
+          : 'Failed to create knowledge space.',
       );
     } finally {
       setSubmitting(false);
@@ -200,6 +217,9 @@ export default function Knowledge() {
           <ConstructGrid>
             {spaces.map((space) => {
               const spaceStats = stats[space.name] || {};
+              const documentCount =
+                spaceStats.document_count ?? Number(space.docs || 0);
+              const indexStatus = getIndexStatus(spaceStats);
               return (
                 <ConstructCard
                   key={space.id}
@@ -212,31 +232,55 @@ export default function Knowledge() {
                   }
                   tags={
                     <>
-                      <Tag icon={<ReadOutlined />}>{space.docs || 0}</Tag>
-                      <Tag>{space.domain_type || 'Normal'}</Tag>
-                      {space.vector_type && <Tag color="blue">{space.vector_type}</Tag>}
-                      {space.index_methods?.map((method) => (
-                        <Tag color="purple" key={method}>
-                          {indexMethodLabels[method] || method}
-                        </Tag>
-                      ))}
-                      {spaceStats.graph_vertex_count != null && (
-                        <Tag icon={<NodeIndexOutlined />} color="geekblue">
-                          {spaceStats.graph_vertex_count}
-                        </Tag>
-                      )}
-                      {spaceStats.graph_edge_count != null && (
-                        <Tag icon={<ShareAltOutlined />} color="geekblue">
-                          {spaceStats.graph_edge_count}
-                        </Tag>
-                      )}
+                      <Tag icon={<ReadOutlined />}>{documentCount} docs</Tag>
+                      <Tag color={indexStatus === 'Ready' ? 'green' : 'blue'}>
+                        {indexStatus}
+                      </Tag>
+                      <Tag color="blue">
+                        {spaceStats.vector_type ||
+                          space.vector_type ||
+                          'Vector store'}
+                      </Tag>
                     </>
                   }
                   description={space.desc || 'No description.'}
                   footer={
                     <>
-                      <span>{space.owner || 'owner unset'}</span>
-                      <span>{space.gmt_modified || ''}</span>
+                      <Space size={[6, 6]} wrap>
+                        {(space.index_methods || [])
+                          .slice(0, 2)
+                          .map((method) => (
+                            <Tag color="purple" key={method}>
+                              {indexMethodLabels[method] || method}
+                            </Tag>
+                          ))}
+                        {spaceStats.graph_vertex_count != null && (
+                          <Tag icon={<NodeIndexOutlined />} color="geekblue">
+                            {spaceStats.graph_vertex_count}
+                          </Tag>
+                        )}
+                        {spaceStats.graph_edge_count != null && (
+                          <Tag icon={<ShareAltOutlined />} color="geekblue">
+                            {spaceStats.graph_edge_count}
+                          </Tag>
+                        )}
+                        <Tag icon={<ClockCircleOutlined />}>
+                          {formatDate(space.gmt_modified)}
+                        </Tag>
+                      </Space>
+                      <Button
+                        size="small"
+                        type="link"
+                        icon={<RightOutlined />}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          router.push(
+                            `/knowledge/${encodeURIComponent(String(space.name))}`,
+                          );
+                        }}
+                      >
+                        Open
+                      </Button>
                     </>
                   }
                 />

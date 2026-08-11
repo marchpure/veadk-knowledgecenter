@@ -9,12 +9,10 @@ import {
   Space,
   Spin,
   Steps,
-  Table,
   Tag,
   Typography,
   message,
 } from 'antd';
-import type { ColumnsType } from 'antd/es/table';
 import ApiOutlined from '@ant-design/icons/ApiOutlined';
 import ArrowLeftOutlined from '@ant-design/icons/ArrowLeftOutlined';
 import CheckCircleOutlined from '@ant-design/icons/CheckCircleOutlined';
@@ -32,7 +30,6 @@ import {
   ConstructEmpty,
   ConstructGrid,
   ConstructLayout,
-  ConstructSection,
   ConstructToolbar,
   StatusTag,
 } from '@/components/construct/ConstructLayout';
@@ -50,6 +47,7 @@ import {
   useSaveDataSourceMutation,
   useSaveRelationsMutation,
   useSaveTablesMutation,
+  useSchemaChangeQuery,
   useUpdateDataSourceMutation,
 } from '@/apollo/client/graphql/dataSource.generated';
 import { DIAGRAM } from '@/apollo/client/graphql/diagram';
@@ -95,7 +93,7 @@ const editorStepKeys = editorSteps.map((step) => step.key);
 
 const ProductRow = styled.div`
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) 148px 108px 108px 156px 148px;
+  grid-template-columns: minmax(220px, 1fr) 132px 148px 132px 148px;
   align-items: center;
   gap: 16px;
   padding: 14px 16px;
@@ -194,6 +192,13 @@ const formatDataSource = (type?: string) =>
         .join(' ')
     : 'Not connected';
 
+const formatDate = (value?: string | null) => {
+  if (!value) return 'Not available';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toISOString().slice(0, 10);
+};
+
 const getDataSourceName = (properties?: Record<string, unknown>) => {
   if (!properties) return 'WrenAI data product';
   return (
@@ -276,8 +281,13 @@ const buildRecommendRelations = (autoGenerateRelation = []) =>
 export default function Database() {
   const router = useRouter();
   const mode = getQueryValue(router.query.mode);
+  const isCreating = mode === 'new';
+  const isEditing = mode === 'edit';
+  const isEditorMode = isCreating || isEditing;
   const queryStep = getQueryValue(router.query.step) as EditorStep | undefined;
-  const settingsQuery = useGetSettingsQuery({ fetchPolicy: 'cache-and-network' });
+  const settingsQuery = useGetSettingsQuery({
+    fetchPolicy: 'cache-and-network',
+  });
   const diagramQuery = useDiagramQuery({ fetchPolicy: 'cache-and-network' });
   const deployStatusQuery = useDeployStatusQuery({
     fetchPolicy: 'cache-and-network',
@@ -287,6 +297,10 @@ export default function Database() {
   const dataSource = settingsQuery.data?.settings?.dataSource;
   const dataSourceType = dataSource?.type;
   const hasSource = Boolean(dataSourceType);
+  const schemaChangeQuery = useSchemaChangeQuery({
+    fetchPolicy: 'cache-and-network',
+    skip: !hasSource || isEditorMode,
+  });
   const models = diagramQuery.data?.diagram?.models || [];
   const views = diagramQuery.data?.diagram?.views || [];
   const modelCount = models.length;
@@ -299,6 +313,8 @@ export default function Database() {
     0,
   );
   const deployStatus = deployStatusQuery.data?.modelSync?.status;
+  const lastSchemaChangeTime =
+    schemaChangeQuery.data?.schemaChange?.lastSchemaChangeTime;
   const productName = getDataSourceName(dataSource?.properties);
   const suggestedStep = getCurrentStep({ hasSource, modelCount, deployStatus });
   const activeStep: EditorStep = editorStepKeys.includes(queryStep)
@@ -307,7 +323,8 @@ export default function Database() {
   const activeStepIndex = editorSteps.findIndex(
     (step) => step.key === activeStep,
   );
-  const [selectedDataSource, setSelectedDataSource] = useState<DataSourceName>();
+  const [selectedDataSource, setSelectedDataSource] =
+    useState<DataSourceName>();
   const [connectError, setConnectError] = useState<Record<string, any>>(null);
 
   const tablesQuery = useListDataSourceTablesQuery({
@@ -333,21 +350,26 @@ export default function Database() {
     refetchQueries: [{ query: DIAGRAM }, { query: LIST_MODELS }],
     awaitRefetchQueries: true,
   });
-  const [saveRelationsMutation, saveRelationsResult] = useSaveRelationsMutation({
-    refetchQueries: [{ query: DIAGRAM }],
-    awaitRefetchQueries: true,
-  });
+  const [saveRelationsMutation, saveRelationsResult] = useSaveRelationsMutation(
+    {
+      refetchQueries: [{ query: DIAGRAM }],
+      awaitRefetchQueries: true,
+    },
+  );
 
   const recommendRelationsResult = useMemo(
     () => buildRecommendRelations(relationsQuery.data?.autoGenerateRelation),
     [relationsQuery.data?.autoGenerateRelation],
   );
 
-  const setEditorStep = (step: EditorStep) => {
+  const setEditorStep = (
+    step: EditorStep,
+    nextMode = isCreating ? 'new' : 'edit',
+  ) => {
     router.push(
       {
         pathname: Path.Database,
-        query: { mode: 'edit', step },
+        query: { mode: nextMode, step },
       },
       undefined,
       { shallow: true },
@@ -365,7 +387,22 @@ export default function Database() {
     );
   };
 
+  const openNewProduct = () => {
+    setSelectedDataSource(undefined);
+    setConnectError(null);
+    router.push(
+      {
+        pathname: Path.Database,
+        query: { mode: 'new', step: 'source' },
+      },
+      undefined,
+      { shallow: true },
+    );
+  };
+
   const backToList = () => {
+    setSelectedDataSource(undefined);
+    setConnectError(null);
     router.push(Path.Database, undefined, { shallow: true });
   };
 
@@ -378,13 +415,15 @@ export default function Database() {
       setConnectError(null);
       return;
     }
-    const type = selectedDataSource || dataSourceType;
+    const type = isCreating
+      ? selectedDataSource
+      : selectedDataSource || dataSourceType;
     if (!type) return;
 
     try {
       setConnectError(null);
       const properties = transformFormToProperties(data.properties, type);
-      if (hasSource) {
+      if (isEditing && hasSource) {
         await updateDataSourceMutation({
           variables: { data: { properties } },
         });
@@ -395,7 +434,7 @@ export default function Database() {
       }
       message.success('Data source saved.');
       setSelectedDataSource(undefined);
-      setEditorStep('tables');
+      setEditorStep('tables', 'edit');
     } catch (error) {
       setConnectError(parseGraphQLError(error as any));
     }
@@ -429,9 +468,7 @@ export default function Database() {
             {hasSource && <Tag>{formatDataSource(dataSourceType)}</Tag>}
           </>
         }
-        right={
-          <Button onClick={() => settingsQuery.refetch()}>Refresh</Button>
-        }
+        right={<Button onClick={() => settingsQuery.refetch()}>Refresh</Button>}
       />
 
       {hasSource ? (
@@ -444,10 +481,11 @@ export default function Database() {
               Current WrenAI semantic project
             </div>
           </div>
-          <Tag icon={<DatabaseOutlined />}>{formatDataSource(dataSourceType)}</Tag>
-          <Text className="gray-8">{modelCount} models</Text>
-          <Text className="gray-8">{views.length} views</Text>
           <StatusTag status={deployStatus || 'not deployed'} />
+          <Tag icon={<DatabaseOutlined />}>
+            {formatDataSource(dataSourceType)}
+          </Tag>
+          <Text className="gray-8">{formatDate(lastSchemaChangeTime)}</Text>
           <Space>
             <Button
               size="small"
@@ -471,7 +509,7 @@ export default function Database() {
             <Button
               type="primary"
               icon={<PlusOutlined />}
-              onClick={() => openEditor('source')}
+              onClick={openNewProduct}
             >
               New data product
             </Button>
@@ -482,11 +520,17 @@ export default function Database() {
   );
 
   const renderSourceStep = () => {
-    const typeForForm = (selectedDataSource ||
-      dataSourceType) as unknown as DATA_SOURCES;
+    const typeForForm = (isCreating
+      ? selectedDataSource
+      : selectedDataSource || dataSourceType) as unknown as
+      | DATA_SOURCES
+      | undefined;
     const initialValues =
-      hasSource && dataSourceType
-        ? transformPropertiesToForm(dataSource?.properties || {}, dataSourceType)
+      isEditing && hasSource && dataSourceType
+        ? transformPropertiesToForm(
+            dataSource?.properties || {},
+            dataSourceType,
+          )
         : undefined;
 
     if (!typeForForm) {
@@ -504,12 +548,14 @@ export default function Database() {
       <ConnectDataSource
         dataSource={typeForForm}
         initialValues={initialValues}
-        mode={hasSource ? FORM_MODE.EDIT : FORM_MODE.CREATE}
+        mode={isEditing && hasSource ? FORM_MODE.EDIT : FORM_MODE.CREATE}
         connectError={connectError}
-        submitting={saveDataSourceResult.loading || updateDataSourceResult.loading}
-        submitText={hasSource ? 'Save and continue' : 'Connect'}
+        submitting={
+          saveDataSourceResult.loading || updateDataSourceResult.loading
+        }
+        submitText={isEditing && hasSource ? 'Save and continue' : 'Connect'}
         onBack={() => {
-          if (selectedDataSource && !hasSource) {
+          if (selectedDataSource && isCreating) {
             setSelectedDataSource(undefined);
           } else {
             backToList();
@@ -536,7 +582,7 @@ export default function Database() {
         fetching={tablesQuery.loading}
         tables={tablesQuery.data?.listDataSourceTables || []}
         submitting={saveTablesResult.loading}
-        onBack={() => setEditorStep('source')}
+        onBack={() => setEditorStep('source', 'edit')}
         onNext={onSaveTables}
       />
     );
@@ -558,7 +604,7 @@ export default function Database() {
         fetching={relationsQuery.loading}
         {...recommendRelationsResult}
         submitting={saveRelationsResult.loading}
-        onBack={() => setEditorStep('tables')}
+        onBack={() => setEditorStep('tables', 'edit')}
         onNext={onSaveRelations}
         onSkip={() => setEditorStep('modeling')}
       />
@@ -717,11 +763,7 @@ export default function Database() {
             onChange={(index) => setEditorStep(editorSteps[index].key)}
           >
             {editorSteps.map((step) => (
-              <Steps.Step
-                key={step.key}
-                title={step.title}
-                icon={step.icon}
-              />
+              <Steps.Step key={step.key} title={step.title} icon={step.icon} />
             ))}
           </Steps>
         </StepRail>
@@ -742,7 +784,7 @@ export default function Database() {
       description="Data products"
       loading={settingsQuery.loading && !settingsQuery.data}
       actions={
-        mode === 'edit' ? (
+        isEditorMode ? (
           <Button icon={<ArrowLeftOutlined />} onClick={backToList}>
             Back
           </Button>
@@ -750,45 +792,14 @@ export default function Database() {
           <Button
             type="primary"
             icon={<PlusOutlined />}
-            onClick={() => openEditor('source')}
+            onClick={openNewProduct}
           >
             New data product
           </Button>
         )
       }
     >
-      {mode === 'edit' ? renderEditor() : renderProductList()}
-
-      {mode !== 'edit' && hasSource && (
-        <div className="mt-4">
-          <ConstructSection title="Schema">
-            <Table
-              size="small"
-              rowKey="modelId"
-              pagination={false}
-              dataSource={models}
-              columns={
-                [
-                  {
-                    title: 'Model',
-                    dataIndex: 'displayName',
-                    render: (value, record) => value || record.referenceName,
-                  },
-                  {
-                    title: 'Reference',
-                    dataIndex: 'referenceName',
-                  },
-                  {
-                    title: 'Fields',
-                    render: (_, record) => record.fields?.length || 0,
-                    width: 90,
-                  },
-                ] as ColumnsType<(typeof models)[number]>
-              }
-            />
-          </ConstructSection>
-        </div>
-      )}
+      {isEditorMode ? renderEditor() : renderProductList()}
     </ConstructLayout>
   );
 }

@@ -1,4 +1,11 @@
-import { DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  DragEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { useRouter } from 'next/router';
 import {
   Alert,
@@ -14,6 +21,7 @@ import {
   Space,
   Spin,
   Switch,
+  Table,
   Tooltip,
   Typography,
   message,
@@ -49,6 +57,7 @@ import ReactFlow, {
   useNodesState,
   useReactFlow,
 } from 'reactflow';
+import type { EdgeTypes, NodeTypes } from 'reactflow';
 import 'reactflow/dist/style.css';
 import {
   DbgptFlow,
@@ -230,7 +239,9 @@ function StaticNodes({ nodes }: { nodes: DbgptFlowNode[] }) {
           draggable
           onDragStart={(event) => onDragStart(event, node)}
         >
-          <NodeIcon $tone={node.flow_type}>{node.flow_type === 'resource' ? 'R' : 'O'}</NodeIcon>
+          <NodeIcon $tone={node.flow_type}>
+            {node.flow_type === 'resource' ? 'R' : 'O'}
+          </NodeIcon>
           <div style={{ minWidth: 0 }}>
             <Text strong ellipsis style={{ display: 'block' }}>
               {node.label}
@@ -263,9 +274,16 @@ function AddNodesSider({ error }: { error?: string }) {
       const data = await fetchDbgpt<DbgptFlowNode[]>(
         `/api/v2/serve/awel/nodes${tags ? `?tags=${encodeURIComponent(tags)}` : ''}`,
       );
-      setOperators((data || []).filter((node) => node.flow_type === 'operator'));
-      setResources((data || []).filter((node) => node.flow_type === 'resource'));
-      window.localStorage.setItem('dbgpt_flow_nodes', JSON.stringify(data || []));
+      setOperators(
+        (data || []).filter((node) => node.flow_type === 'operator'),
+      );
+      setResources(
+        (data || []).filter((node) => node.flow_type === 'resource'),
+      );
+      window.localStorage.setItem(
+        'dbgpt_flow_nodes',
+        JSON.stringify(data || []),
+      );
     } catch (_err) {
       setOperators([]);
       setResources([]);
@@ -414,7 +432,9 @@ function NodePort({
 }) {
   const handleId = `${node.id}|${label}|${index}`;
   return (
-    <PortRow style={{ justifyContent: type === 'source' ? 'flex-end' : 'flex-start' }}>
+    <PortRow
+      style={{ justifyContent: type === 'source' ? 'flex-end' : 'flex-start' }}
+    >
       {type === 'target' && (
         <Handle
           type="target"
@@ -426,7 +446,9 @@ function NodePort({
       <Tooltip title={port.description || port.type_name}>
         <span>
           {port.label || port.name}
-          {port.optional === false ? <span className="red-6 ml-1">*</span> : null}
+          {port.optional === false ? (
+            <span className="red-6 ml-1">*</span>
+          ) : null}
         </span>
       </Tooltip>
       {type === 'source' && (
@@ -500,7 +522,9 @@ function CanvasNode({ data }: NodeProps<DbgptFlowNode>) {
     event.stopPropagation();
     reactFlow.setNodes((nodes) => nodes.filter((item) => item.id !== node.id));
     reactFlow.setEdges((edges) =>
-      edges.filter((edge) => edge.source !== node.id && edge.target !== node.id),
+      edges.filter(
+        (edge) => edge.source !== node.id && edge.target !== node.id,
+      ),
     );
   };
 
@@ -543,7 +567,12 @@ function CanvasNode({ data }: NodeProps<DbgptFlowNode>) {
           <Tooltip title={node.description}>
             <Button size="small" type="text" icon={<InfoCircleOutlined />} />
           </Tooltip>
-          <Button size="small" type="text" icon={<CopyOutlined />} onClick={copyNode} />
+          <Button
+            size="small"
+            type="text"
+            icon={<CopyOutlined />}
+            onClick={copyNode}
+          />
           <Button
             size="small"
             type="text"
@@ -685,7 +714,9 @@ function ButtonEdge({
           }}
           onClick={(event) => {
             event.stopPropagation();
-            reactFlow.setEdges((edges) => edges.filter((edge) => edge.id !== id));
+            reactFlow.setEdges((edges) =>
+              edges.filter((edge) => edge.id !== id),
+            );
           }}
         >
           x
@@ -695,10 +726,12 @@ function ButtonEdge({
   );
 }
 
-const nodeTypes = { customNode: CanvasNode };
-const edgeTypes = { buttonedge: ButtonEdge };
+const nodeTypes: NodeTypes = { customNode: CanvasNode };
+const edgeTypes: EdgeTypes = { buttonedge: ButtonEdge };
 
-const checkRequired = (flowData: DbgptFlowData): [boolean, Node | undefined, string] => {
+const checkRequired = (
+  flowData: DbgptFlowData,
+): [boolean, Node | undefined, string] => {
   const nodes = flowData.nodes || [];
   const edges = flowData.edges || [];
   if (!nodes.length) return [false, undefined, 'Please add nodes first.'];
@@ -711,9 +744,15 @@ const checkRequired = (flowData: DbgptFlowData): [boolean, Node | undefined, str
       const input = inputs[index];
       if (
         input.optional === false &&
-        !edges.some((edge) => edge.targetHandle === `${node.id}|inputs|${index}`)
+        !edges.some(
+          (edge) => edge.targetHandle === `${node.id}|inputs|${index}`,
+        )
       ) {
-        return [false, node as unknown as Node, `The input ${input.label} of node ${data.label} is required.`];
+        return [
+          false,
+          node as unknown as Node,
+          `The input ${input.label} of node ${data.label} is required.`,
+        ];
       }
     }
     for (let index = 0; index < parameters.length; index += 1) {
@@ -721,16 +760,28 @@ const checkRequired = (flowData: DbgptFlowData): [boolean, Node | undefined, str
       if (
         parameter.optional === false &&
         parameter.category === 'resource' &&
-        !edges.some((edge) => edge.targetHandle === `${node.id}|parameters|${index}`)
+        !edges.some(
+          (edge) => edge.targetHandle === `${node.id}|parameters|${index}`,
+        )
       ) {
-        return [false, node as unknown as Node, `The parameter ${parameter.label} of node ${data.label} is required.`];
+        return [
+          false,
+          node as unknown as Node,
+          `The parameter ${parameter.label} of node ${data.label} is required.`,
+        ];
       }
       if (
         parameter.optional === false &&
         parameter.category !== 'resource' &&
-        (parameter.value === undefined || parameter.value === null || parameter.value === '')
+        (parameter.value === undefined ||
+          parameter.value === null ||
+          parameter.value === '')
       ) {
-        return [false, node as unknown as Node, `The parameter ${parameter.label} of node ${data.label} is required.`];
+        return [
+          false,
+          node as unknown as Node,
+          `The parameter ${parameter.label} of node ${data.label} is required.`,
+        ];
       }
     }
   }
@@ -777,7 +828,9 @@ function SaveFlowModal({
     if (!reactFlow) return;
     setSaving(true);
     try {
-      const flowData = mapReactFlowToFlowData(reactFlow.toObject() as DbgptFlowData);
+      const flowData = mapReactFlowToFlowData(
+        reactFlow.toObject() as DbgptFlowData,
+      );
       const payload: DbgptFlowPayload = {
         name: values.name,
         label: values.label,
@@ -788,13 +841,16 @@ function SaveFlowModal({
         variables: flowInfo?.variables,
       };
       const result = flowInfo?.uid
-        ? await fetchDbgpt<DbgptFlow>(`/api/v2/serve/awel/flows/${flowInfo.uid}`, {
-            method: 'PUT',
-            body: JSON.stringify({
-              ...payload,
-              uid: flowInfo.uid,
-            }),
-          })
+        ? await fetchDbgpt<DbgptFlow>(
+            `/api/v2/serve/awel/flows/${flowInfo.uid}`,
+            {
+              method: 'PUT',
+              body: JSON.stringify({
+                ...payload,
+                uid: flowInfo.uid,
+              }),
+            },
+          )
         : await fetchDbgpt<DbgptFlow>('/api/v2/serve/awel/flows', {
             method: 'POST',
             body: JSON.stringify(payload),
@@ -803,7 +859,9 @@ function SaveFlowModal({
       onSaved(result);
       onClose();
     } catch (error) {
-      message.error(error instanceof Error ? error.message : 'Failed to save flow.');
+      message.error(
+        error instanceof Error ? error.message : 'Failed to save flow.',
+      );
     } finally {
       setSaving(false);
     }
@@ -833,7 +891,8 @@ function SaveFlowModal({
             { required: true, message: 'Please input flow name.' },
             {
               pattern: /^[a-zA-Z0-9_-]+$/,
-              message: 'Can only contain numbers, letters, underscores, and dashes.',
+              message:
+                'Can only contain numbers, letters, underscores, and dashes.',
             },
           ]}
         >
@@ -845,10 +904,105 @@ function SaveFlowModal({
         <Form.Item label="Editable" name="editable" valuePropName="checked">
           <Switch />
         </Form.Item>
-        <Form.Item label="Deploy" name="state" valuePropName="checked" getValueFromEvent={(checked) => (checked ? 'deployed' : 'developing')} getValueProps={(value) => ({ checked: value === 'deployed' })}>
+        <Form.Item
+          label="Deploy"
+          name="state"
+          valuePropName="checked"
+          getValueFromEvent={(checked) => (checked ? 'deployed' : 'developing')}
+          getValueProps={(value) => ({ checked: value === 'deployed' })}
+        >
           <Switch />
         </Form.Item>
       </Form>
+    </Modal>
+  );
+}
+
+function TemplateFlowModal({
+  open,
+  onClose,
+  onImport,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onImport: (flow: DbgptFlow) => void;
+}) {
+  const [templates, setTemplates] = useState<DbgptFlow[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const loadTemplates = async () => {
+    setLoading(true);
+    try {
+      const data = await fetchDbgpt<{
+        items: DbgptFlow[];
+        total_count: number;
+        total_pages: number;
+        page: number;
+        page_size: number;
+      }>('/api/v2/serve/awel/flow/templates');
+      setTemplates(data?.items || []);
+    } catch (err) {
+      message.error(
+        err instanceof Error ? err.message : 'Unable to load flow templates.',
+      );
+      setTemplates([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (open) loadTemplates();
+  }, [open]);
+
+  return (
+    <Modal
+      visible={open}
+      title="Import from template"
+      width={920}
+      footer={null}
+      destroyOnClose
+      onCancel={onClose}
+    >
+      <Table
+        rowKey="uid"
+        loading={loading}
+        dataSource={templates}
+        pagination={templates.length > 8 ? { pageSize: 8 } : false}
+        columns={[
+          {
+            title: 'Name',
+            dataIndex: 'name',
+            width: '24%',
+          },
+          {
+            title: 'Label',
+            dataIndex: 'label',
+            width: '24%',
+          },
+          {
+            title: 'Description',
+            dataIndex: 'description',
+            ellipsis: true,
+          },
+          {
+            title: 'Action',
+            key: 'action',
+            width: 120,
+            render: (_, record: DbgptFlow) => (
+              <Button
+                type="link"
+                onClick={() => {
+                  onImport(record);
+                  onClose();
+                }}
+              >
+                Import
+              </Button>
+            ),
+          },
+        ]}
+      />
     </Modal>
   );
 }
@@ -859,18 +1013,22 @@ function Canvas() {
   const reactFlow = useReactFlow();
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-  const [reactFlowInstance, setReactFlowInstance] = useState<ReactFlowInstance>();
+  const [reactFlowInstance, setReactFlowInstance] =
+    useState<ReactFlowInstance>();
   const [flowInfo, setFlowInfo] = useState<DbgptFlow>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
   const [saveOpen, setSaveOpen] = useState(false);
+  const [templateOpen, setTemplateOpen] = useState(false);
   const flowId = getQueryValue(router.query.id);
 
   const loadFlow = async (id: string) => {
     setLoading(true);
     setError(undefined);
     try {
-      const data = await fetchDbgpt<DbgptFlow>(`/api/v2/serve/awel/flows/${id}`);
+      const data = await fetchDbgpt<DbgptFlow>(
+        `/api/v2/serve/awel/flows/${id}`,
+      );
       const flowData = mapFlowDataToReactFlow(data.flow_data);
       setFlowInfo(data);
       setNodes((flowData.nodes || []) as any);
@@ -944,15 +1102,13 @@ function Canvas() {
         },
       };
       setNodes((currentNodes) =>
-        currentNodes
-          .concat(newNode)
-          .map((node) => ({
-            ...node,
-            data: {
-              ...node.data,
-              selected: node.id === newNode.id,
-            },
-          })),
+        currentNodes.concat(newNode).map((node) => ({
+          ...node,
+          data: {
+            ...node.data,
+            selected: node.id === newNode.id,
+          },
+        })),
       );
     },
     [reactFlow, setNodes],
@@ -1021,11 +1177,33 @@ function Canvas() {
     input.click();
   };
 
+  const importTemplate = (template: DbgptFlow) => {
+    const flowData = mapFlowDataToReactFlow(template.flow_data);
+    setNodes((flowData.nodes || []) as any);
+    setEdges((flowData.edges || []) as any);
+    setFlowInfo(
+      (current) =>
+        ({
+          ...current,
+          label: template.label,
+          name: template.name,
+          description: template.description,
+          flow_data: template.flow_data,
+          variables: template.variables,
+        }) as DbgptFlow,
+    );
+    window.requestAnimationFrame(() => reactFlow.fitView());
+    message.success('Template imported.');
+  };
+
   return (
     <CanvasFrame>
       <CanvasHeader>
         <Space>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => router.push(Path.Workflow)}>
+          <Button
+            icon={<ArrowLeftOutlined />}
+            onClick={() => router.push(Path.Workflow)}
+          >
             Workflow
           </Button>
           <Divider type="vertical" />
@@ -1036,7 +1214,10 @@ function Canvas() {
         </Space>
         <Space>
           <Tooltip title="Template">
-            <Button icon={<FileAddOutlined />} onClick={() => message.info('Template selection uses DB-GPT templates when that API is enabled.')} />
+            <Button
+              icon={<FileAddOutlined />}
+              onClick={() => setTemplateOpen(true)}
+            />
           </Tooltip>
           <Tooltip title="Import">
             <Button icon={<ImportOutlined />} onClick={importFlow} />
@@ -1107,6 +1288,11 @@ function Canvas() {
             );
           }
         }}
+      />
+      <TemplateFlowModal
+        open={templateOpen}
+        onClose={() => setTemplateOpen(false)}
+        onImport={importTemplate}
       />
     </CanvasFrame>
   );

@@ -19,8 +19,25 @@ export type DbgptKnowledgeSpace = {
 };
 
 export type DbgptKnowledgeStats = {
+  name?: string;
+  domain_type?: string | null;
+  vector_type?: string | null;
+  index_methods?: string[] | null;
+  desc?: string | null;
+  document_count?: number | null;
+  chunk_count?: number | null;
+  sync_status?: string | null;
+  sync_total_files?: number | null;
+  sync_finished?: number | null;
+  sync_running?: number | null;
+  sync_failed?: number | null;
+  sync_todo?: number | null;
+  repo_url?: string | null;
+  branch?: string | null;
   graph_vertex_count?: number | null;
   graph_edge_count?: number | null;
+  graph_community_count?: number | null;
+  graph_build_status?: string | null;
 };
 
 export type DbgptFlow = {
