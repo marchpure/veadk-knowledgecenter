@@ -7,14 +7,17 @@ import { InstructionsSVG } from '@/utils/svgs';
 import SidebarMenu from '@/components/sidebar/SidebarMenu';
 
 const Layout = styled.div`
-  padding: 16px 0;
-  position: absolute;
-  z-index: 1;
-  left: 0;
-  top: 0;
+  padding: 16px 0 0;
   width: 100%;
   background-color: var(--gray-2);
   overflow: hidden;
+`;
+
+const ScopeLabel = styled.div`
+  padding: 0 16px 6px;
+  color: var(--gray-7);
+  font-size: 12px;
+  font-weight: 700;
 `;
 
 const MENU_KEY_MAP = {
@@ -24,14 +27,26 @@ const MENU_KEY_MAP = {
 
 const linkStyle = { color: 'inherit', transition: 'none' };
 
+const getQueryValue = (value: string | string[] | undefined) =>
+  Array.isArray(value) ? value[0] : value;
+
 export default function Knowledge() {
   const router = useRouter();
+  const projectId = getQueryValue(router.query.projectId);
+  const scopedQuery = projectId ? { projectId } : {};
+  const isProjectScoped = Boolean(projectId);
 
   const menuItems = [
     {
       'data-guideid': 'question-sql-pairs',
       label: (
-        <Link style={linkStyle} href={Path.KnowledgeQuestionSQLPairs}>
+        <Link
+          style={linkStyle}
+          href={{
+            pathname: Path.KnowledgeQuestionSQLPairs,
+            query: scopedQuery,
+          }}
+        >
           Question-SQL pairs
         </Link>
       ),
@@ -42,7 +57,10 @@ export default function Knowledge() {
     {
       'data-guideid': 'instructions',
       label: (
-        <Link style={linkStyle} href={Path.KnowledgeInstructions}>
+        <Link
+          style={linkStyle}
+          href={{ pathname: Path.KnowledgeInstructions, query: scopedQuery }}
+        >
           Instructions
         </Link>
       ),
@@ -54,6 +72,7 @@ export default function Knowledge() {
 
   return (
     <Layout>
+      {isProjectScoped && <ScopeLabel>Data product configuration</ScopeLabel>}
       <SidebarMenu
         items={menuItems}
         selectedKeys={MENU_KEY_MAP[router.pathname]}

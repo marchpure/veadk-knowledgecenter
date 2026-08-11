@@ -35,6 +35,7 @@ export type RelationFieldValue = Pick<
 
 type Props = ModalAction<RelationFieldValue, RelationFormValues> & {
   model: string;
+  projectId?: number;
   loading?: boolean;
   relations: SelectedRecommendRelations;
   isRecommendMode?: boolean;
@@ -45,6 +46,7 @@ export default function RelationModal(props: Props) {
     defaultValue,
     loading,
     model,
+    projectId,
     onClose,
     onSubmit,
     relations,
@@ -57,7 +59,7 @@ export default function RelationModal(props: Props) {
   // only suitable use for modeling page
   const isUpdateMode = formMode === FORM_MODE.EDIT;
 
-  const fromCombineField = useCombineFieldOptions({ model });
+  const fromCombineField = useCombineFieldOptions({ model, projectId });
   const modelValue = fromCombineField.modelOptions.find((option) => {
     const value: any = convertIdentifierToObject(option.value);
     return value.referenceName === model;
@@ -67,6 +69,7 @@ export default function RelationModal(props: Props) {
   const toCombineField = useCombineFieldOptions({
     model: toFieldModel,
     excludeModels: [model],
+    projectId,
   });
 
   useEffect(() => {

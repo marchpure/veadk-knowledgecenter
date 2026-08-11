@@ -21,21 +21,49 @@ const isDatabaseResourceRequest = (
   query.type === 'database' &&
   (query.version === undefined || query.version === 'v2');
 
+const listVeadkDatabaseResources = async () => {
+  const runtime = await import('@/server/applications/applicationRuntime');
+  return runtime.listVeadkDataProductResources();
+};
+
+const buildFallbackDatabaseResourceBody = async (
+  query: Record<string, string | string[]>,
+) => {
+  const resources = await listVeadkDatabaseResources();
+  if (query.version === 'v2') {
+    return {
+      success: true,
+      data: [
+        {
+          param_name: 'name',
+          param_type: 'string',
+          label: 'name',
+          default_value: 'datasource',
+          required: true,
+        },
+        {
+          param_name: 'db_name',
+          param_type: 'string',
+          label: 'db_name',
+          required: true,
+          valid_values: resources,
+        },
+      ],
+      upstream_status: 'unavailable',
+    };
+  }
+  return {
+    success: true,
+    data: resources,
+    upstream_status: 'unavailable',
+  };
+};
+
 const mergeVeadkDatabaseResources = async (
   body: any,
   query: Record<string, string | string[]>,
 ) => {
-  let resources: Array<{ label: string; key: string; description?: string }>;
-  try {
-    const runtime = await import('@/server/applications/applicationRuntime');
-    resources = await runtime.listVeadkDataProductResources();
-  } catch (error) {
-    console.warn(
-      '[dbgpt proxy] Unable to append VeADK data products to DB-GPT database resources:',
-      error instanceof Error ? error.message : error,
-    );
-    return body;
-  }
+  const resources = await listVeadkDatabaseResources();
   const data = Array.isArray(body?.data)
     ? body.data
     : Array.isArray(body)
@@ -121,10 +149,44 @@ export default async function handler(
     ) {
       body = await mergeVeadkDatabaseResources(body, query);
     }
+    if (!response.ok) {
+      const message =
+        typeof body === 'string'
+          ? body
+          : body?.error ||
+            body?.err_msg ||
+            `DB-GPT request failed with HTTP ${response.status}`;
+      res.status(200).json({
+        success: false,
+        err_code: String(response.status),
+        err_msg: message,
+        upstream_status: response.status,
+      });
+      return;
+    }
     res.status(response.status).send(body);
   } catch (error) {
-    res.status(502).json({
-      error:
+    if (isDatabaseResourceRequest(targetPath, query)) {
+      try {
+        res.status(200).json(await buildFallbackDatabaseResourceBody(query));
+        return;
+      } catch (fallbackError) {
+        res.status(200).json({
+          success: false,
+          err_code: 'VEADK_RESOURCE_UNAVAILABLE',
+          err_msg:
+            fallbackError instanceof Error
+              ? fallbackError.message
+              : 'Unable to load local VeADK data product resources.',
+          target: baseUrl,
+        });
+        return;
+      }
+    }
+    res.status(200).json({
+      success: false,
+      err_code: 'UPSTREAM_UNAVAILABLE',
+      err_msg:
         error instanceof Error
           ? error.message
           : 'Unable to reach DB-GPT service.',

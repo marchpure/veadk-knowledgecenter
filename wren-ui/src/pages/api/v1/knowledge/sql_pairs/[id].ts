@@ -8,6 +8,7 @@ import {
   validateSql,
 } from '@/apollo/server/utils/apiUtils';
 import { getLogger } from '@server/utils';
+import { withApiProjectScope } from '@/server/apiProjectScope';
 
 const logger = getLogger('API_SQL_PAIR_BY_ID');
 logger.level = 'debug';
@@ -125,10 +126,7 @@ const handleDeleteSqlPair = async (
   });
 };
 
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse,
-) {
+async function handler(req: NextApiRequest, res: NextApiResponse) {
   const startTime = Date.now();
   let project;
 
@@ -165,3 +163,5 @@ export default async function handler(
     });
   }
 }
+
+export default withApiProjectScope(handler);

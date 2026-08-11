@@ -15,6 +15,7 @@ import {
   IContext,
   RelationType,
   DiagramView,
+  RelationData,
 } from '@server/types';
 import { ColumnMDL, Manifest } from '@server/mdl/type';
 import { getLogger } from '@server/utils';
@@ -23,6 +24,77 @@ import { MDLBuilder } from '../mdl/mdlBuilder';
 const logger = getLogger('DiagramResolver');
 logger.level = 'debug';
 
+const singularizeIdentifier = (value: string) => {
+  const normalized = value.toLowerCase();
+  if (normalized.endsWith('ies')) return `${normalized.slice(0, -3)}y`;
+  if (normalized.endsWith('s')) return normalized.slice(0, -1);
+  return normalized;
+};
+
+const normalizeIdentifier = (value: string) =>
+  singularizeIdentifier(value.replace(/[^a-zA-Z0-9]/g, '').toLowerCase());
+
+const isLikelyPrimaryKeyName = (tableName: string, columnName: string) => {
+  const normalizedTable = normalizeIdentifier(tableName);
+  const normalizedColumn = normalizeIdentifier(columnName);
+  return (
+    normalizedColumn === 'id' ||
+    normalizedColumn === `${normalizedTable}id` ||
+    normalizedColumn === `${normalizedTable}key`
+  );
+};
+
+const inferRelationsFromModelColumns = (
+  projectId: number,
+  models: Model[],
+  columns: ModelColumn[],
+): RelationData[] => {
+  const relationMap = new Map<string, RelationData>();
+  for (const fromModel of models) {
+    const fromColumns = columns.filter(
+      (column) => column.modelId === fromModel.id,
+    );
+    for (const fromColumn of fromColumns) {
+      if (!fromColumn.sourceColumnName.toLowerCase().endsWith('_id')) continue;
+      for (const toModel of models) {
+        if (fromModel.id === toModel.id) continue;
+        const toColumns = columns.filter(
+          (column) => column.modelId === toModel.id,
+        );
+        const toColumn =
+          toColumns.find(
+            (column) =>
+              column.isPk &&
+              column.sourceColumnName === fromColumn.sourceColumnName,
+          ) ||
+          toColumns.find(
+            (column) =>
+              column.sourceColumnName === fromColumn.sourceColumnName &&
+              isLikelyPrimaryKeyName(
+                toModel.sourceTableName,
+                column.sourceColumnName,
+              ),
+          );
+        if (!toColumn) continue;
+        const relation = {
+          projectId,
+          fromModelId: fromModel.id,
+          fromColumnId: fromColumn.id,
+          toModelId: toModel.id,
+          toColumnId: toColumn.id,
+          type: RelationType.MANY_TO_ONE,
+          description: `Inferred from ${fromModel.sourceTableName}.${fromColumn.sourceColumnName} to ${toModel.sourceTableName}.${toColumn.sourceColumnName}.`,
+        };
+        relationMap.set(
+          `${relation.fromModelId}:${relation.fromColumnId}:${relation.toModelId}:${relation.toColumnId}`,
+          relation,
+        );
+      }
+    }
+  }
+  return Array.from(relationMap.values());
+};
+
 export class DiagramResolver {
   constructor() {
     this.getDiagram = this.getDiagram.bind(this);
@@ -30,10 +102,15 @@ export class DiagramResolver {
 
   public async getDiagram(
     _root: any,
-    _args: any,
+    args: { projectId?: number },
     ctx: IContext,
   ): Promise<Diagram> {
-    const project = await ctx.projectRepository.getCurrentProject();
+    const project = args.projectId
+      ? await ctx.projectService.getProjectById(args.projectId)
+      : await ctx.projectRepository.getCurrentProject();
+    if (!project) {
+      throw new Error(`Project ${args.projectId} not found`);
+    }
     const models = await ctx.modelRepository.findAllBy({
       projectId: project.id,
     });
@@ -45,9 +122,28 @@ export class DiagramResolver {
       await ctx.modelNestedColumnRepository.findNestedColumnsByModelIds(
         modelIds,
       );
-    const modelRelations = await ctx.relationRepository.findRelationInfoBy({
-      columnIds: modelColumns.map((column) => column.id),
+    let modelRelations = await ctx.relationRepository.findRelationInfoBy({
+      projectId: project.id,
     });
+    if (!modelRelations.length && models.length > 1) {
+      const inferredRelations = inferRelationsFromModelColumns(
+        project.id,
+        models,
+        modelColumns,
+      );
+      for (const relation of inferredRelations) {
+        try {
+          await ctx.modelService.createRelation(relation);
+        } catch (error: any) {
+          logger.debug(
+            `Skip inferred relation for project ${project.id}: ${error.message}`,
+          );
+        }
+      }
+      modelRelations = await ctx.relationRepository.findRelationInfoBy({
+        projectId: project.id,
+      });
+    }
     const views = await ctx.viewRepository.findAllBy({
       projectId: project.id,
     });

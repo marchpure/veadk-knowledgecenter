@@ -62,6 +62,11 @@ type FormValues = {
   fields?: Record<string, string>;
 };
 
+type TestResult = {
+  success: boolean;
+  message: string;
+};
+
 type BrandToken = {
   icon: React.ReactNode;
   gradient: string;
@@ -71,6 +76,7 @@ type BrandToken = {
 const attentionStatuses = new Set<ConnectorStatus>([
   'error',
   'needs_reactivation',
+  'pending_verification',
 ]);
 
 const CONNECTOR_CONFIG_FIELDS = new Set([
@@ -153,6 +159,12 @@ const STATUS_META: Record<
     icon: <CheckCircleFilled />,
   },
   needs_reactivation: {
+    dot: '#f59e0b',
+    text: '#b45309',
+    bg: '#fffbeb',
+    icon: <WarningFilled />,
+  },
+  pending_verification: {
     dot: '#f59e0b',
     text: '#b45309',
     bg: '#fffbeb',
@@ -367,6 +379,17 @@ const CardDescription = styled.p`
   line-height: 1.6;
 `;
 
+const TestFeedback = styled.div<{ $success: boolean }>`
+  margin-top: 12px;
+  padding: 8px 10px;
+  border: 1px solid ${(props) => (props.$success ? '#bbf7d0' : '#fecdd3')};
+  border-radius: 8px;
+  color: ${(props) => (props.$success ? '#047857' : '#be123c')};
+  background: ${(props) => (props.$success ? '#ecfdf5' : '#fff1f2')};
+  font-size: 12px;
+  line-height: 1.5;
+`;
+
 const ChipRow = styled.div`
   display: flex;
   flex-wrap: wrap;
@@ -458,6 +481,45 @@ const TypeChip = styled.span`
 const brandFor = (type: string) => BRAND_TOKENS[type] || FALLBACK_BRAND;
 const unwrapList = <T,>(value: T[] | undefined) => value || [];
 
+const verifiedConnectorStorageKey = 'veadk_verified_connectors';
+
+const getVerifiedConnectors = () => {
+  if (typeof window === 'undefined') return {};
+  try {
+    return JSON.parse(
+      window.localStorage.getItem(verifiedConnectorStorageKey) || '{}',
+    ) as Record<string, 'active' | 'error'>;
+  } catch {
+    return {};
+  }
+};
+
+const setVerifiedConnector = (id: string, value: 'active' | 'error') => {
+  if (typeof window === 'undefined') return;
+  const next = { ...getVerifiedConnectors(), [id]: value };
+  window.localStorage.setItem(
+    verifiedConnectorStorageKey,
+    JSON.stringify(next),
+  );
+};
+
+const clearVerifiedConnector = (id: string) => {
+  if (typeof window === 'undefined') return;
+  const next = getVerifiedConnectors();
+  delete next[id];
+  window.localStorage.setItem(
+    verifiedConnectorStorageKey,
+    JSON.stringify(next),
+  );
+};
+
+const getTransportLabel = (connector?: ConnectorInstance) => {
+  const value = String(connector?.config?.transport || '').toLowerCase();
+  if (value === 'streamable_http') return 'Streamable HTTP';
+  if (value === 'sse') return 'SSE';
+  return 'MCP';
+};
+
 const withCustomMcpTemplate = (items: ConnectorCatalogEntry[]) => {
   const hasCustomMcp = items.some(
     (item) => item.type === CUSTOM_MCP_TEMPLATE.type,
@@ -479,6 +541,8 @@ function ConnectorCard({
   onDelete,
   onTest,
   onOpenTools,
+  testingId,
+  testResult,
 }: {
   item: GridItem;
   onActivate: (template: ConnectorCatalogEntry) => void;
@@ -486,6 +550,8 @@ function ConnectorCard({
   onDelete: (id: string) => void;
   onTest: (id: string) => void;
   onOpenTools: (connector: ConnectorInstance) => void;
+  testingId?: string;
+  testResult?: TestResult;
 }) {
   const isTemplate = item.kind === 'template';
   const type = isTemplate ? item.template.type : item.instance.connector_type;
@@ -497,6 +563,13 @@ function ConnectorCard({
     ? item.template.category
     : item.template?.category ||
       (item.instance.is_custom ? 'custom' : 'project');
+  const identity = isTemplate
+    ? 'official'
+    : item.instance.is_custom || item.instance.connector_type === 'custom_mcp'
+      ? 'custom'
+      : item.template
+        ? 'official'
+        : 'custom';
   const description = isTemplate
     ? item.template.description || 'Connector template.'
     : (item.instance.config?.description as string) ||
@@ -545,24 +618,33 @@ function ConnectorCard({
           <MetaLine>
             <span>{category}</span>
             <span>·</span>
-            <span>MCP / SSE</span>
-            {!isTemplate && item.instance.created_at && (
-              <>
-                <span>·</span>
-                <span>{item.instance.created_at.slice(0, 10)}</span>
-              </>
-            )}
+            <span>{isTemplate ? 'MCP' : getTransportLabel(item.instance)}</span>
+            {!isTemplate &&
+              (item.instance.created_at || item.instance.gmt_created) && (
+                <>
+                  <span>·</span>
+                  <span>
+                    {(
+                      item.instance.created_at || item.instance.gmt_created
+                    )?.slice(0, 10)}
+                  </span>
+                </>
+              )}
           </MetaLine>
         </div>
       </CardHeader>
 
       <CardDescription>{description || 'No description.'}</CardDescription>
+      {!isTemplate && testResult && (
+        <TestFeedback $success={testResult.success}>
+          {testResult.success ? 'Test passed' : 'Test failed'}:{' '}
+          {testResult.message}
+        </TestFeedback>
+      )}
 
       <ChipRow>
         <SoftChip>{type}</SoftChip>
-        <SoftChip $accent>
-          {isTemplate || item.template ? 'official' : 'custom'}
-        </SoftChip>
+        <SoftChip $accent>{identity}</SoftChip>
         {isTemplate && (
           <SoftChip>{item.template.auth_fields.length} auth fields</SoftChip>
         )}
@@ -588,6 +670,8 @@ function ConnectorCard({
           <>
             <Button
               size="small"
+              loading={testingId === item.instance.id}
+              disabled={Boolean(testingId)}
               onClick={(event) => {
                 event.stopPropagation();
                 onTest(item.instance.id);
@@ -892,6 +976,10 @@ export default function Tools() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [error, setError] = useState<string | null>(null);
+  const [testingId, setTestingId] = useState('');
+  const [testResultsById, setTestResultsById] = useState<
+    Record<string, TestResult>
+  >({});
 
   const selectedType = Form.useWatch('connector_type', form);
   const watchedFields = Form.useWatch('fields', form) || {};
@@ -926,7 +1014,23 @@ export default function Tools() {
       const data = await fetchDbgpt<ConnectorInstance[]>(
         '/api/v2/serve/connectors/',
       );
-      setConnectors(unwrapList(data).map(normalizeConnector));
+      const verified = getVerifiedConnectors();
+      setConnectors(
+        unwrapList(data).map((item) => {
+          const connector = normalizeConnector(item);
+          const verifiedStatus = verified[connector.id];
+          if (verifiedStatus) {
+            return { ...connector, status: verifiedStatus };
+          }
+          if (
+            connector.is_custom ||
+            connector.connector_type === 'custom_mcp'
+          ) {
+            return { ...connector, status: 'pending_verification' };
+          }
+          return connector;
+        }),
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load tools.');
       setConnectors([]);
@@ -1115,11 +1219,17 @@ export default function Tools() {
           method: 'PUT',
           body: JSON.stringify(payload),
         });
+        clearVerifiedConnector(editing.id);
       } else {
-        await fetchDbgpt('/api/v2/serve/connectors/', {
-          method: 'POST',
-          body: JSON.stringify(payload),
-        });
+        const created = await fetchDbgpt<ConnectorInstance>(
+          '/api/v2/serve/connectors/',
+          {
+            method: 'POST',
+            body: JSON.stringify(payload),
+          },
+        );
+        const normalized = normalizeConnector(created);
+        clearVerifiedConnector(normalized.id);
       }
       message.success(editing ? 'Connector updated.' : 'Connector created.');
       setFormOpen(false);
@@ -1138,6 +1248,7 @@ export default function Tools() {
       await fetchDbgpt(`/api/v2/serve/connectors/${id}`, {
         method: 'DELETE',
       });
+      clearVerifiedConnector(id);
       message.success('Connector deleted.');
       await loadConnectors();
     } catch (err) {
@@ -1148,21 +1259,45 @@ export default function Tools() {
   };
 
   const testConnector = async (id: string) => {
+    setTestingId(id);
     try {
       const result = await fetchDbgpt<{ success: boolean; message?: string }>(
         `/api/v2/serve/connectors/${id}/test`,
         { method: 'POST' },
       );
       if (result?.success) {
+        setVerifiedConnector(id, 'active');
+        setTestResultsById((current) => ({
+          ...current,
+          [id]: {
+            success: true,
+            message: result.message || 'Connection test passed.',
+          },
+        }));
         message.success(result.message || 'Connection test passed.');
       } else {
+        setVerifiedConnector(id, 'error');
+        setTestResultsById((current) => ({
+          ...current,
+          [id]: {
+            success: false,
+            message: result?.message || 'Connection test failed.',
+          },
+        }));
         message.error(result?.message || 'Connection test failed.');
       }
       await loadConnectors();
     } catch (err) {
-      message.error(
-        err instanceof Error ? err.message : 'Failed to test connector.',
-      );
+      setVerifiedConnector(id, 'error');
+      const messageText =
+        err instanceof Error ? err.message : 'Failed to test connector.';
+      setTestResultsById((current) => ({
+        ...current,
+        [id]: { success: false, message: messageText },
+      }));
+      message.error(messageText);
+    } finally {
+      setTestingId('');
     }
   };
 
@@ -1303,6 +1438,12 @@ export default function Tools() {
                 onDelete={deleteConnector}
                 onTest={testConnector}
                 onOpenTools={setToolsConnector}
+                testingId={testingId}
+                testResult={
+                  item.kind === 'instance'
+                    ? testResultsById[item.instance.id]
+                    : undefined
+                }
               />
             ))}
           </ConnectorGrid>

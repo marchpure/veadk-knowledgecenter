@@ -17,6 +17,7 @@ import {
   WrenAILanguage,
 } from '@/apollo/server/models/adaptor';
 import { getLogger } from '@server/utils';
+import { withApiProjectScope } from '@/server/apiProjectScope';
 
 const logger = getLogger('API_GENERATE_SUMMARY');
 logger.level = 'debug';
@@ -32,10 +33,7 @@ interface GenerateSummaryRequest {
   threadId?: string;
 }
 
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse,
-) {
+async function handler(req: NextApiRequest, res: NextApiResponse) {
   const { question, sql, sampleSize, language, threadId } =
     req.body as GenerateSummaryRequest;
   const startTime = Date.now();
@@ -197,3 +195,5 @@ export default async function handler(
     });
   }
 }
+
+export default withApiProjectScope(handler);

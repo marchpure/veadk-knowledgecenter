@@ -5,6 +5,7 @@ import {
   Button,
   Collapse,
   Spin,
+  Table,
   Tag,
   Timeline,
   Typography,
@@ -134,6 +135,20 @@ const DetailValue = styled.div`
   word-break: break-word;
 `;
 
+const SqlBlock = styled.pre`
+  max-height: 320px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid rgba(226, 232, 240, 0.94);
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+`;
+
 type ShareRound = {
   question?: DbgptShareMessage;
   answer?: DbgptShareMessage;
@@ -244,6 +259,40 @@ const buildRounds = (messages: DbgptShareMessage[]) => {
   });
   return rounds;
 };
+
+const normalizeCell = (value: unknown) => {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+};
+
+const getResultRows = (result?: VeadkApplicationAskResponse) => {
+  const columns = result?.data?.columns || [];
+  const rows = result?.data?.data || [];
+  return rows.map((row, rowIndex) => {
+    const record: Record<string, unknown> = { __runtimeRowKey: rowIndex };
+    columns.forEach((column, index) => {
+      record[column.name || `column_${index + 1}`] = row[index];
+    });
+    return record;
+  });
+};
+
+const getResultColumns = (result?: VeadkApplicationAskResponse) =>
+  (result?.data?.columns || []).map((column, index) => ({
+    title: column.name || `column_${index + 1}`,
+    dataIndex: column.name || `column_${index + 1}`,
+    key: column.name || `column_${index + 1}`,
+    render: normalizeCell,
+  }));
+
+const getChartContract = (result: VeadkApplicationAskResponse) => ({
+  title: result.project.displayName,
+  describe: 'Data product result',
+  type: 'table',
+  sql: result.sql,
+  data: getResultRows(result).map(({ __runtimeRowKey, ...row }) => row),
+});
 
 export default function ApplicationShareReplay() {
   const router = useRouter();
@@ -440,6 +489,53 @@ export default function ApplicationShareReplay() {
                   message="No answer found"
                   description="The share token exists, but no application answer was returned."
                 />
+              )}
+              {applicationShare?.result.runtimeError && (
+                <Alert
+                  className="mt-4"
+                  type="warning"
+                  showIcon
+                  message={`Runtime degraded at ${applicationShare.result.runtimeError.stage}`}
+                  description={applicationShare.result.runtimeError.message}
+                />
+              )}
+              {applicationShare?.result.sql && (
+                <Collapse className="mt-4" bordered={false}>
+                  <Collapse.Panel header="SQL" key="sql">
+                    <SqlBlock>{applicationShare.result.sql}</SqlBlock>
+                  </Collapse.Panel>
+                  <Collapse.Panel header="Structured data" key="data">
+                    {getResultRows(applicationShare.result).length ? (
+                      <Table
+                        size="small"
+                        rowKey="__runtimeRowKey"
+                        dataSource={getResultRows(applicationShare.result)}
+                        columns={getResultColumns(applicationShare.result)}
+                        pagination={
+                          getResultRows(applicationShare.result).length > 20
+                            ? { pageSize: 20 }
+                            : false
+                        }
+                        scroll={{ x: true }}
+                      />
+                    ) : (
+                      <Alert
+                        type="info"
+                        showIcon
+                        message="The shared query returned no rows."
+                      />
+                    )}
+                  </Collapse.Panel>
+                  <Collapse.Panel header="Chart contract" key="chart">
+                    <SqlBlock>
+                      {JSON.stringify(
+                        getChartContract(applicationShare.result),
+                        null,
+                        2,
+                      )}
+                    </SqlBlock>
+                  </Collapse.Panel>
+                </Collapse>
               )}
               {messages.length > 0 && (
                 <Collapse className="mt-4" bordered={false}>

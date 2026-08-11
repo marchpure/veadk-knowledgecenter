@@ -1,14 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
-import {
-  Alert,
-  Button,
-  Input,
-  Spin,
-  Tag,
-  Typography,
-  message,
-} from 'antd';
+import { Alert, Button, Input, Spin, Tag, Typography, message } from 'antd';
 import CopyOutlined from '@ant-design/icons/CopyOutlined';
 import ForkOutlined from '@ant-design/icons/ForkOutlined';
 import LeftOutlined from '@ant-design/icons/LeftOutlined';
@@ -308,7 +300,9 @@ export default function WorkflowRunPage() {
       });
       if (!response.ok) {
         const text = await response.text();
-        throw new Error(text || `Workflow chat failed with HTTP ${response.status}`);
+        throw new Error(
+          text || `Workflow chat failed with HTTP ${response.status}`,
+        );
       }
       const answer = await readDbgptStreamResponse(response);
       setMessages((current) => [
@@ -342,163 +336,181 @@ export default function WorkflowRunPage() {
     <SimpleLayout loading={loading} checkOnboarding={false}>
       <Page>
         <Inner>
-        <Header>
-          <HeaderTitle>
-            <FlowIcon>
-              <ForkOutlined />
-            </FlowIcon>
-            <div style={{ minWidth: 0 }}>
-              <Title level={3} className="mb-0">
-                {flow?.label || flow?.name || 'Workflow'}
-              </Title>
-              <Paragraph className="gray-7 mb-0 mt-1">
-                {flow?.description ||
-                  'Run this DB-GPT AWEL flow through chat_flow.'}
-              </Paragraph>
-              {flow && (
-                <MetaRow>
-                  {flow.source && <Tag>{flow.source}</Tag>}
-                  {flow.define_type && <Tag color="purple">{flow.define_type}</Tag>}
-                  <Tag color={getStatusColor(flow.state)}>{flow.state || 'unknown'}</Tag>
-                </MetaRow>
-              )}
-            </div>
-          </HeaderTitle>
-          <Actions>
-            <Button
-              icon={<LeftOutlined />}
-              onClick={() => router.push(Path.Workflow)}
-            >
-              Workflow
-            </Button>
-            {flow && (
-              <Button
-                onClick={() =>
-                  router.push(
-                    `${Path.Workflow}/canvas?id=${encodeURIComponent(flow.uid)}`,
-                  )
-                }
-              >
-                Edit
-              </Button>
-            )}
-          </Actions>
-        </Header>
-
-        {error ? (
-          <Alert
-            type="error"
-            showIcon
-            message="Workflow could not be opened"
-            description={error}
-            action={<Button onClick={() => router.push(Path.Workflow)}>Back</Button>}
-          />
-        ) : (
-          <Spin spinning={loading}>
-            {flow && (
-              <Workspace>
-                <ChatPanel>
-                  <ChatHeader>
-                    <div>
-                      <Title level={5} className="mb-0">
-                        Chat flow
-                      </Title>
-                      <Text className="gray-7">
-                        DB-GPT receives chat_mode=chat_flow and select_param={flow.uid}.
-                      </Text>
-                    </div>
-                    <Tag color="green">{convUid ? 'Dialogue active' : 'Ready'}</Tag>
-                  </ChatHeader>
-                  <ChatBody>
-                    {messages.length ? (
-                      messages.map((item) => (
-                        <MessageRow key={item.id} $role={item.role}>
-                          <Bubble $role={item.role}>
-                            <DbgptRuntimeContent content={item.content} />
-                          </Bubble>
-                        </MessageRow>
-                      ))
-                    ) : (
-                      <EmptyState>
-                        <div>
-                          <Title level={5}>Ask this workflow</Title>
-                          <Paragraph className="gray-7 mb-0">
-                            The request is sent to DB-GPT chat completions with
-                            this flow uid as the selected runtime parameter.
-                          </Paragraph>
-                        </div>
-                      </EmptyState>
+          <Header>
+            <HeaderTitle>
+              <FlowIcon>
+                <ForkOutlined />
+              </FlowIcon>
+              <div style={{ minWidth: 0 }}>
+                <Title level={3} className="mb-0">
+                  {flow?.label || flow?.name || 'Workflow'}
+                </Title>
+                <Paragraph className="gray-7 mb-0 mt-1">
+                  {flow?.description ||
+                    'Run this DB-GPT AWEL flow through chat_flow.'}
+                </Paragraph>
+                {flow && (
+                  <MetaRow>
+                    {flow.source && <Tag>{flow.source}</Tag>}
+                    {flow.define_type && (
+                      <Tag color="purple">{flow.define_type}</Tag>
                     )}
-                  </ChatBody>
-                  <Composer>
-                    <Input.TextArea
-                      value={question}
-                      disabled={running}
-                      placeholder="Ask this workflow"
-                      autoSize={{ minRows: 2, maxRows: 6 }}
-                      onChange={(event) => setQuestion(event.target.value)}
-                      onPressEnter={(event) => {
-                        if (!event.shiftKey) {
-                          event.preventDefault();
-                          send();
-                        }
-                      }}
-                    />
-                    <div className="d-flex justify-space-between align-center mt-3">
-                      <Text className="gray-7 text-sm">
-                        {convUid ? `Conversation ${convUid}` : 'New conversation'}
-                      </Text>
+                    <Tag color={getStatusColor(flow.state)}>
+                      {flow.state || 'unknown'}
+                    </Tag>
+                  </MetaRow>
+                )}
+              </div>
+            </HeaderTitle>
+            <Actions>
+              <Button
+                icon={<LeftOutlined />}
+                onClick={() => router.push(Path.Workflow)}
+              >
+                Workflow
+              </Button>
+              {flow && (
+                <Button
+                  onClick={() =>
+                    router.push(
+                      `${Path.Workflow}/canvas?id=${encodeURIComponent(flow.uid)}`,
+                    )
+                  }
+                >
+                  Edit
+                </Button>
+              )}
+            </Actions>
+          </Header>
+
+          {error ? (
+            <Alert
+              type="error"
+              showIcon
+              message="Workflow could not be opened"
+              description={error}
+              action={
+                <Button onClick={() => router.push(Path.Workflow)}>Back</Button>
+              }
+            />
+          ) : (
+            <Spin spinning={loading}>
+              {flow && (
+                <Workspace>
+                  <ChatPanel>
+                    <ChatHeader>
+                      <div>
+                        <Title level={5} className="mb-0">
+                          Chat flow
+                        </Title>
+                        <Text className="gray-7">
+                          DB-GPT receives chat_mode=chat_flow and select_param=
+                          {flow.uid}.
+                        </Text>
+                      </div>
+                      <Tag color="green">
+                        {convUid ? 'Dialogue active' : 'Ready'}
+                      </Tag>
+                    </ChatHeader>
+                    <ChatBody>
+                      {messages.length ? (
+                        messages.map((item) => (
+                          <MessageRow key={item.id} $role={item.role}>
+                            <Bubble $role={item.role}>
+                              <DbgptRuntimeContent content={item.content} />
+                            </Bubble>
+                          </MessageRow>
+                        ))
+                      ) : (
+                        <EmptyState>
+                          <div>
+                            <Title level={5}>Ask this workflow</Title>
+                            <Paragraph className="gray-7 mb-0">
+                              The request is sent to DB-GPT chat completions
+                              with this flow uid as the selected runtime
+                              parameter.
+                            </Paragraph>
+                          </div>
+                        </EmptyState>
+                      )}
+                    </ChatBody>
+                    <Composer>
+                      <Input.TextArea
+                        value={question}
+                        disabled={running}
+                        placeholder="Ask this workflow"
+                        autoSize={{ minRows: 2, maxRows: 6 }}
+                        onChange={(event) => setQuestion(event.target.value)}
+                        onPressEnter={(event) => {
+                          if (!event.shiftKey) {
+                            event.preventDefault();
+                            send();
+                          }
+                        }}
+                      />
+                      <div className="d-flex justify-space-between align-center mt-3">
+                        <Text className="gray-7 text-sm">
+                          {convUid
+                            ? `Conversation ${convUid}`
+                            : 'New conversation'}
+                        </Text>
+                        <Button
+                          type="primary"
+                          icon={<SendOutlined />}
+                          disabled={!question.trim()}
+                          loading={running}
+                          onClick={send}
+                        >
+                          Send
+                        </Button>
+                      </div>
+                    </Composer>
+                  </ChatPanel>
+
+                  <SidePanel>
+                    <Title level={5} className="mb-0">
+                      Runtime
+                    </Title>
+                    <Paragraph className="gray-7 mt-1 mb-3">
+                      Mirrors DB-GPT flow chat invocation without routing to the
+                      missing DB-GPT /chat page.
+                    </Paragraph>
+                    <SummaryItem>
+                      <Text className="gray-7 text-sm">Dialogue endpoint</Text>
+                      <div>
+                        <Text copyable>
+                          /api/v1/chat/dialogue/new?chat_mode=chat_agent
+                        </Text>
+                      </div>
+                    </SummaryItem>
+                    <SummaryItem>
+                      <Text className="gray-7 text-sm">Ask endpoint</Text>
+                      <div>
+                        <Text copyable>/api/v1/chat/completions</Text>
+                      </div>
+                    </SummaryItem>
+                    <SummaryItem>
+                      <Text className="gray-7 text-sm">select_param</Text>
+                      <div>
+                        <Text strong>{flow.uid}</Text>
+                      </div>
+                    </SummaryItem>
+                    <div className="d-flex justify-space-between align-center mt-3 mb-2">
+                      <Text className="gray-7 text-sm">Payload</Text>
                       <Button
-                        type="primary"
-                        icon={<SendOutlined />}
-                        disabled={!question.trim()}
-                        loading={running}
-                        onClick={send}
+                        size="small"
+                        icon={<CopyOutlined />}
+                        onClick={copyPayload}
                       >
-                        Send
+                        Copy
                       </Button>
                     </div>
-                  </Composer>
-                </ChatPanel>
-
-                <SidePanel>
-                  <Title level={5} className="mb-0">
-                    Runtime
-                  </Title>
-                  <Paragraph className="gray-7 mt-1 mb-3">
-                    Mirrors DB-GPT flow chat invocation without routing to the
-                    missing DB-GPT /chat page.
-                  </Paragraph>
-                  <SummaryItem>
-                    <Text className="gray-7 text-sm">Dialogue endpoint</Text>
-                    <div>
-                      <Text copyable>/api/v1/chat/dialogue/new?chat_mode=chat_agent</Text>
-                    </div>
-                  </SummaryItem>
-                  <SummaryItem>
-                    <Text className="gray-7 text-sm">Ask endpoint</Text>
-                    <div>
-                      <Text copyable>/api/v1/chat/completions</Text>
-                    </div>
-                  </SummaryItem>
-                  <SummaryItem>
-                    <Text className="gray-7 text-sm">select_param</Text>
-                    <div>
-                      <Text strong>{flow.uid}</Text>
-                    </div>
-                  </SummaryItem>
-                  <div className="d-flex justify-space-between align-center mt-3 mb-2">
-                    <Text className="gray-7 text-sm">Payload</Text>
-                    <Button size="small" icon={<CopyOutlined />} onClick={copyPayload}>
-                      Copy
-                    </Button>
-                  </div>
-                  <CodeBlock>{payloadPreview}</CodeBlock>
-                </SidePanel>
-              </Workspace>
-            )}
-          </Spin>
-        )}
+                    <CodeBlock>{payloadPreview}</CodeBlock>
+                  </SidePanel>
+                </Workspace>
+              )}
+            </Spin>
+          )}
         </Inner>
       </Page>
     </SimpleLayout>

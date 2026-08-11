@@ -7,8 +7,8 @@ export const SET_SAMPLE_DATASETS = gql`
 `;
 
 export const LIST_DATA_SOURCE_TABLES = gql`
-  query ListDataSourceTables {
-    listDataSourceTables {
+  query ListDataSourceTables($projectId: Int) {
+    listDataSourceTables(projectId: $projectId) {
       name
       columns {
         name
@@ -71,8 +71,8 @@ export const SAVE_RELATIONS = gql`
 `;
 
 export const GET_SCHEMA_CHANGE = gql`
-  query SchemaChange {
-    schemaChange {
+  query SchemaChange($projectId: Int) {
+    schemaChange(projectId: $projectId) {
       deletedTables {
         sourceTableName
         displayName
@@ -133,13 +133,16 @@ export const GET_SCHEMA_CHANGE = gql`
 `;
 
 export const TRIGGER_DATA_SOURCE_DETECTION = gql`
-  mutation TriggerDataSourceDetection {
-    triggerDataSourceDetection
+  mutation TriggerDataSourceDetection($projectId: Int) {
+    triggerDataSourceDetection(projectId: $projectId)
   }
 `;
 
 export const RESOLVE_SCHEMA_CHANGE = gql`
-  mutation ResolveSchemaChange($where: ResolveSchemaChangeWhereInput!) {
-    resolveSchemaChange(where: $where)
+  mutation ResolveSchemaChange(
+    $where: ResolveSchemaChangeWhereInput!
+    $projectId: Int
+  ) {
+    resolveSchemaChange(where: $where, projectId: $projectId)
   }
 `;

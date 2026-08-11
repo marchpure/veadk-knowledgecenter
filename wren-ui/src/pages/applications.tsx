@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useState,
+  type ReactElement,
   type ReactNode,
 } from 'react';
 import Link from 'next/link';
@@ -43,6 +44,7 @@ import LeftOutlined from '@ant-design/icons/LeftOutlined';
 import PictureOutlined from '@ant-design/icons/PictureOutlined';
 import PlusOutlined from '@ant-design/icons/PlusOutlined';
 import ReadOutlined from '@ant-design/icons/ReadOutlined';
+import ReloadOutlined from '@ant-design/icons/ReloadOutlined';
 import RocketOutlined from '@ant-design/icons/RocketOutlined';
 import SearchOutlined from '@ant-design/icons/SearchOutlined';
 import SendOutlined from '@ant-design/icons/SendOutlined';
@@ -90,6 +92,10 @@ import {
   getDialogueCreationEndpoint,
   getRecommendQuestions,
 } from '@/lib/dbgptRuntime';
+import {
+  findVeadkDataProductBinding,
+  parseResourceConfig,
+} from '@/lib/veadkApplicationResources';
 import { Path } from '@/utils/enum';
 
 const { Paragraph, Text, Title } = Typography;
@@ -105,6 +111,16 @@ type RuntimeStatus = {
   detail?: string;
   tone: RuntimeStatusTone;
 };
+
+type ResourceAvailabilityState = 'checking' | 'available' | 'unavailable';
+
+type ResourceAvailability = {
+  state: ResourceAvailabilityState;
+  label: string;
+  detail?: string;
+};
+
+type ResourceAvailabilityMap = Record<string, ResourceAvailability>;
 
 type AppFormValues = {
   app_name: string;
@@ -183,20 +199,23 @@ const tabOptions: Array<{ label: string; value: TabKey }> = [
 
 const AppGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 18px;
 `;
 
 const AppCard = styled.div<{ $runtime?: boolean; $interactive?: boolean }>`
+  position: relative;
   display: flex;
   flex-direction: column;
-  min-height: 220px;
+  min-height: 378px;
+  height: 100%;
   padding: 18px;
   border: 1px solid rgba(226, 232, 240, 0.96);
   border-radius: 8px;
   background: #fff;
-  box-shadow: 0 8px 26px rgba(15, 23, 42, 0.06);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
   cursor: ${(props) => (props.$interactive ? 'pointer' : 'default')};
+  overflow: hidden;
   transition:
     border-color 0.18s ease,
     box-shadow 0.18s ease,
@@ -213,15 +232,33 @@ const AppCard = styled.div<{ $runtime?: boolean; $interactive?: boolean }>`
   }
 `;
 
+const AppCardWash = styled.div`
+  position: absolute;
+  top: -52px;
+  right: -52px;
+  width: 132px;
+  height: 132px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #2867f5, #7c3aed);
+  filter: blur(30px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+
+  ${AppCard}:hover & {
+    opacity: 0.2;
+  }
+`;
+
 const AppIcon = styled.div<{ $color?: string }>`
   display: grid;
   place-items: center;
   flex: 0 0 auto;
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
   color: #fff;
-  font-size: 18px;
+  font-size: 17px;
   background: ${(props) =>
     props.$color || 'linear-gradient(135deg, #2867f5, #4f46e5)'};
 `;
@@ -234,10 +271,15 @@ const AppHeader = styled.div`
 `;
 
 const AppTitle = styled.div`
+  display: -webkit-box;
   color: #111827;
   font-size: 15px;
   font-weight: 700;
   line-height: 1.35;
+  overflow: hidden;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 `;
 
 const AppMeta = styled.div`
@@ -245,22 +287,149 @@ const AppMeta = styled.div`
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 8px;
+
+  .ant-tag {
+    max-width: 100%;
+    margin-right: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+`;
+
+const AppDescription = styled(Paragraph)`
+  && {
+    min-height: 40px;
+    margin: 14px 0 0;
+    color: #475569;
+    font-size: 13px;
+    line-height: 1.55;
+  }
 `;
 
 const AppFooter = styled.div`
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: stretch;
   gap: 10px;
   margin-top: auto;
-  padding-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(226, 232, 240, 0.82);
 `;
 
 const FooterActions = styled.div`
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+
+  .ant-btn {
+    height: 32px;
+  }
+
+  @media (max-width: 520px) {
+    flex-wrap: wrap;
+  }
+`;
+
+const StudioButton = styled(Button)<{ $variant?: 'gradient' | 'soft' }>`
+  && {
+    border-radius: 7px;
+    border: ${(props) =>
+      props.$variant === 'gradient'
+        ? '0'
+        : '1px solid rgba(191, 219, 254, 0.96)'};
+    color: ${(props) => (props.$variant === 'gradient' ? '#fff' : '#1e3a8a')};
+    background: ${(props) =>
+      props.$variant === 'gradient'
+        ? 'linear-gradient(135deg, #2867f5, #7c3aed)'
+        : 'linear-gradient(135deg, #ffffff 0%, #f8fbff 52%, #f5f3ff 100%)'};
+    box-shadow: ${(props) =>
+      props.$variant === 'gradient'
+        ? '0 8px 20px rgba(40, 103, 245, 0.22)'
+        : '0 5px 14px rgba(37, 99, 235, 0.10)'};
+    font-weight: 600;
+    letter-spacing: 0;
+    transition:
+      transform 0.18s ease,
+      box-shadow 0.18s ease,
+      border-color 0.18s ease,
+      background 0.18s ease;
+
+    .anticon {
+      color: inherit;
+    }
+  }
+
+  &&:hover,
+  &&:focus {
+    border-color: ${(props) =>
+      props.$variant === 'gradient' ? 'transparent' : '#a5b4fc'};
+    color: ${(props) => (props.$variant === 'gradient' ? '#fff' : '#1d4ed8')};
+    background: ${(props) =>
+      props.$variant === 'gradient'
+        ? 'linear-gradient(135deg, #1d4ed8, #6d28d9)'
+        : 'linear-gradient(135deg, #eff6ff 0%, #eef2ff 56%, #f5f3ff 100%)'};
+    box-shadow: ${(props) =>
+      props.$variant === 'gradient'
+        ? '0 12px 26px rgba(40, 103, 245, 0.28)'
+        : '0 10px 24px rgba(40, 103, 245, 0.15), 0 0 0 3px rgba(124, 58, 237, 0.08)'};
+    transform: translateY(-1px);
+  }
+
+  &&[disabled],
+  &&.ant-btn-disabled,
+  &&[disabled]:hover,
+  &&.ant-btn-disabled:hover {
+    border-color: #e2e8f0;
+    color: #94a3b8;
+    background: #f1f5f9;
+    box-shadow: none;
+    transform: none;
+  }
+`;
+
+const FilterButton = styled(Button)<{ $active?: boolean }>`
+  && {
+    border-radius: 7px;
+    border: ${(props) =>
+      props.$active ? '0' : '1px solid rgba(191, 219, 254, 0.9)'};
+    color: ${(props) => (props.$active ? '#fff' : '#1e3a8a')};
+    background: ${(props) =>
+      props.$active
+        ? 'linear-gradient(135deg, #2867f5, #7c3aed)'
+        : 'linear-gradient(135deg, #ffffff 0%, #f8fbff 56%, #f5f3ff 100%)'};
+    box-shadow: ${(props) =>
+      props.$active
+        ? '0 8px 18px rgba(40, 103, 245, 0.20)'
+        : '0 4px 12px rgba(37, 99, 235, 0.07)'};
+    font-weight: 600;
+  }
+
+  &&:hover,
+  &&:focus {
+    border-color: ${(props) => (props.$active ? 'transparent' : '#a5b4fc')};
+    color: ${(props) => (props.$active ? '#fff' : '#1d4ed8')};
+    background: ${(props) =>
+      props.$active
+        ? 'linear-gradient(135deg, #1d4ed8, #6d28d9)'
+        : 'linear-gradient(135deg, #eff6ff 0%, #eef2ff 56%, #f5f3ff 100%)'};
+    box-shadow: ${(props) =>
+      props.$active
+        ? '0 10px 22px rgba(40, 103, 245, 0.24)'
+        : '0 8px 18px rgba(40, 103, 245, 0.11)'};
+  }
+`;
+
+const FooterMeta = styled.div`
+  min-width: 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 `;
 
 const ModeGrid = styled.div`
@@ -670,12 +839,6 @@ const ResourcePanel = styled.div`
   padding: 16px;
 `;
 
-const ConfigSummary = styled.div`
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 8px;
-`;
-
 const ConfigSummaryItem = styled.div`
   padding: 10px 12px;
   border: 1px solid rgba(226, 232, 240, 0.94);
@@ -702,7 +865,7 @@ const FieldList = styled.div`
 
 const StepRail = styled.div`
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 10px;
   margin-top: 16px;
 
@@ -906,7 +1069,7 @@ const BoundResourceGrid = styled.div`
 const CardSection = styled.div`
   display: grid;
   gap: 8px;
-  margin-top: 14px;
+  margin-top: 12px;
 `;
 
 const MiniResourceList = styled.div`
@@ -916,33 +1079,119 @@ const MiniResourceList = styled.div`
 
 const MiniResourceItem = styled.div`
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
   align-items: center;
   min-width: 0;
-  padding: 7px 9px;
+  min-height: 52px;
+  padding: 9px 10px;
   border: 1px solid rgba(226, 232, 240, 0.92);
   border-radius: 8px;
-  background: #f8fafc;
+  background: #fbfdff;
 `;
 
-const RuntimeLine = styled.div`
+const ResourceName = styled.div`
+  color: #111827;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+`;
+
+const ResourceMeta = styled.div`
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  margin-top: 4px;
   min-width: 0;
   color: #64748b;
   font-size: 12px;
+  line-height: 1.35;
 
-  .ant-typography {
+  span:first-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ant-tag {
+    flex: 0 0 auto;
+    margin-right: 0;
     font-size: 12px;
   }
+`;
+
+const ResourceOverflow = styled.div`
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.4;
+`;
+
+const EmptyResourceHint = styled.div`
+  padding: 10px 12px;
+  border: 1px dashed rgba(148, 163, 184, 0.58);
+  border-radius: 8px;
+  color: #64748b;
+  font-size: 13px;
+  background: #f8fafc;
+`;
+
+const StatusPanel = styled.div<{ $tone?: RuntimeStatusTone }>`
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 62px;
+  padding: 10px 12px;
+  border: 1px solid
+    ${(props) =>
+      props.$tone === 'error'
+        ? 'rgba(251, 146, 60, 0.42)'
+        : props.$tone === 'success'
+          ? 'rgba(34, 197, 94, 0.28)'
+          : 'rgba(147, 197, 253, 0.42)'};
+  border-radius: 8px;
+  background: ${(props) =>
+    props.$tone === 'error'
+      ? '#fff7ed'
+      : props.$tone === 'success'
+        ? '#f0fdf4'
+        : '#eff6ff'};
+`;
+
+const StatusTitle = styled.div`
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+`;
+
+const StatusDescription = styled.div`
+  display: -webkit-box;
+  margin-top: 3px;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 `;
 
 const QuestionChips = styled.div`
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+
+  .ant-tag {
+    max-width: 100%;
+    margin-right: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 `;
 
 const EntryHint = styled.div`
@@ -1056,7 +1305,9 @@ const getAvailablePublishKinds = (resourceTypes: string[]) => {
   const kinds: ResourcePublishKind[] = [];
   if (resourceTypes.includes('database')) kinds.push('database');
   if (resourceTypes.includes('knowledge')) kinds.push('knowledge');
-  if (resourceTypes.some((type) => type === 'tool' || type.startsWith('tool('))) {
+  if (
+    resourceTypes.some((type) => type === 'tool' || type.startsWith('tool('))
+  ) {
     kinds.push('tool');
   }
   return kinds;
@@ -1120,8 +1371,10 @@ const buildResourceConfigFromSelection = ({
     config.connector_id = connector.id;
     config.connector_type = connector.connector_type;
     config.name = connector.display_name || label || key || 'Tool connector';
-    if (connector.config?.auth_type) config.auth_type = connector.config.auth_type;
-    if (connector.config?.transport) config.transport = connector.config.transport;
+    if (connector.config?.auth_type)
+      config.auth_type = connector.config.auth_type;
+    if (connector.config?.transport)
+      config.transport = connector.config.transport;
   }
   if (!config.name) config.name = label || key || 'Resource';
   return config;
@@ -1387,17 +1640,171 @@ const getApplicationResourceBindings = (app: DbgptApp) => {
   return resources;
 };
 
-const getApplicationBoundResourceSummary = (app: DbgptApp) => {
-  const bindings = getApplicationResourceBindings(app);
-  if (!bindings.length) return 'No resources bound';
-  const counts = bindings.reduce<Record<string, number>>((acc, binding) => {
-    const type = getPublishResourceType({ type: binding.type }) || binding.type;
-    acc[type] = (acc[type] || 0) + 1;
-    return acc;
-  }, {});
-  return Object.entries(counts)
-    .map(([type, count]) => `${count} ${type}${count > 1 ? 's' : ''}`)
-    .join(', ');
+const getResourceAvailabilityKey = (resource: DbgptAppResource) => {
+  if (resource.type === 'database') {
+    const config = parseResourceConfig(resource.value);
+    const dbName =
+      typeof config.db_name === 'string'
+        ? config.db_name
+        : typeof config.database === 'string'
+          ? config.database
+          : '';
+    if (dbName.startsWith('veadk:project:')) return dbName;
+  }
+  if (resource.type === 'knowledge') {
+    const config = parseResourceConfig(resource.value);
+    return `knowledge:${String(
+      config.space_name ||
+        config.space ||
+        resource.name ||
+        resource.value ||
+        '',
+    )}`;
+  }
+  if (resource.type === 'tool' || resource.type?.startsWith('tool(')) {
+    const config = parseResourceConfig(resource.value);
+    return `tool:${String(
+      config.connector_id ||
+        config.mcp_servers ||
+        config.name ||
+        resource.name ||
+        '',
+    )}`;
+  }
+  return undefined;
+};
+
+const getAppAvailabilityKeys = (app: DbgptApp) => {
+  const keys = new Set<string>();
+  getApplicationResources(app).forEach(({ resource }) => {
+    const key = getResourceAvailabilityKey(resource);
+    if (key) keys.add(key);
+  });
+  const nativeBinding = findVeadkDataProductBinding(app);
+  if (nativeBinding) keys.add(nativeBinding.key);
+  return Array.from(keys);
+};
+
+const getResourcePreflightIssues = (
+  app: DbgptApp,
+  availability: ResourceAvailabilityMap,
+  catalog: CatalogState,
+) => {
+  const issues: string[] = [];
+  const keys = getAppAvailabilityKeys(app);
+  keys.forEach((key) => {
+    const status = availability[key];
+    if (status?.state === 'checking') {
+      issues.push(`Checking ${status.label}.`);
+    }
+    if (status?.state === 'unavailable') {
+      issues.push(status.detail || `${status.label} is unavailable.`);
+    }
+  });
+
+  const hasToolResource = getApplicationResources(app).some(
+    ({ resource }) =>
+      resource.type === 'tool' || resource.type?.startsWith('tool('),
+  );
+  if (hasToolResource) {
+    const hasActiveConnector = catalog.connectors.some(
+      (connector) =>
+        connector.status === 'active' && Boolean(connector.config?.server_uri),
+    );
+    if (!hasActiveConnector) {
+      issues.push(
+        'No active MCP connector. Activate a connector in Tools before binding it.',
+      );
+    }
+    getApplicationResources(app)
+      .filter(
+        ({ resource }) =>
+          resource.type === 'tool' || resource.type?.startsWith('tool('),
+      )
+      .forEach(({ resource }) => {
+        const config = parseResourceConfig(resource.value);
+        const connectorId = String(config.connector_id || '');
+        const serverUri = String(config.mcp_servers || '');
+        const matched = catalog.connectors.find(
+          (connector) =>
+            (connectorId && connector.id === connectorId) ||
+            (serverUri && connector.config?.server_uri === serverUri),
+        );
+        if (matched && matched.status !== 'active') {
+          issues.push(
+            `MCP connector ${matched.display_name} is ${matched.status}. Activate it in Tools before publishing.`,
+          );
+        }
+        if (
+          (connectorId || serverUri) &&
+          !matched &&
+          catalog.connectors.length
+        ) {
+          issues.push(
+            'Bound MCP connector is unavailable in the current runtime. Refresh resources or rebind it from Tools.',
+          );
+        }
+      });
+  }
+
+  if (app.team_mode === 'awel_layout') {
+    const hasWorkflow = Boolean(
+      app.team_context?.name || app.team_context?.uid,
+    );
+    if (!catalog.flows.length) {
+      issues.push(
+        'No deployed workflow available. Create or deploy a workflow before publishing a workflow application.',
+      );
+    } else if (!hasWorkflow) {
+      issues.push('Choose a deployed workflow before publishing.');
+    }
+  }
+
+  return Array.from(new Set(issues));
+};
+
+const getActionDisabledReason = ({
+  app,
+  action,
+  dirty,
+  availability,
+  catalog,
+}: {
+  app: DbgptApp;
+  action: 'start' | 'publish' | 'save' | 'bind';
+  dirty?: boolean;
+  availability: ResourceAvailabilityMap;
+  catalog: CatalogState;
+}) => {
+  const preflightIssues = getResourcePreflightIssues(
+    app,
+    availability,
+    catalog,
+  );
+  if (action === 'start') {
+    if (!isPublished(app)) return 'Publish required.';
+    if (dirty) return 'Save changes before running.';
+    if (!getAppRuntimeReady(app)) {
+      return (
+        getBlockingGaps(app)[0] || 'Complete resource binding before running.'
+      );
+    }
+    return preflightIssues[0];
+  }
+  if (action === 'publish') {
+    if (dirty) return 'Save changes before publishing.';
+    if (!canPublishApp(app)) {
+      return (
+        getBlockingGaps(app)[0] ||
+        'Complete resource binding before publishing.'
+      );
+    }
+    return preflightIssues[0];
+  }
+  if (action === 'save') {
+    return preflightIssues[0];
+  }
+  return preflightIssues[0];
 };
 
 const getNativeResourceSummary = (app: DbgptApp) => {
@@ -1420,7 +1827,9 @@ const getApplicationRuntimeRoute = (app: DbgptApp) => {
       builderValue: agents.length ? agents.join(', ') : 'No agent selected',
       runtimeKey: 'chat_agent',
       runtimeValue: resources.length
-        ? resources.map(({ resource }) => resource.name || resource.type).join(', ')
+        ? resources
+            .map(({ resource }) => resource.name || resource.type)
+            .join(', ')
         : 'No bound resources',
     };
   }
@@ -1446,7 +1855,9 @@ const getApplicationRuntimeRoute = (app: DbgptApp) => {
       runtimeKey: getChatScene(app),
       runtimeValue:
         resource?.bind_value ||
-        (resource?.value ? `${resource.value} selected at runtime` : 'No resource required'),
+        (resource?.value
+          ? `${resource.value} selected at runtime`
+          : 'No resource required'),
     };
   }
 
@@ -1458,11 +1869,29 @@ const getApplicationRuntimeRoute = (app: DbgptApp) => {
   };
 };
 
-const getApplicationRuntimeStatus = (app: DbgptApp): RuntimeStatus => {
+const getApplicationRuntimeStatus = (
+  app: DbgptApp,
+  availability: ResourceAvailabilityMap = {},
+  catalog: CatalogState = emptyCatalog,
+): RuntimeStatus => {
+  const preflightIssues = getResourcePreflightIssues(
+    app,
+    availability,
+    catalog,
+  );
+  if (preflightIssues.length) {
+    const checking = preflightIssues[0].startsWith('Checking ');
+    return {
+      label: checking ? 'Checking runtime' : 'Runtime unavailable',
+      detail: preflightIssues[0],
+      tone: checking ? 'default' : 'error',
+    };
+  }
   if (isPublished(app) && getAppRuntimeReady(app)) {
     return {
       label: 'Ready',
-      detail: 'Published runtime can start a unified conversation.',
+      detail:
+        'Configuration is complete and published. Recent run status is shown after runtime execution.',
       tone: 'success',
     };
   }
@@ -1680,6 +2109,27 @@ function ApplicationModal({
         </ModalCreateLayout>
       </Spin>
     </Modal>
+  );
+}
+
+function ActionButtonWithReason({
+  reason,
+  children,
+}: {
+  reason?: string;
+  children: ReactElement;
+}) {
+  if (!reason) return children;
+  return (
+    <Tooltip title={reason}>
+      <span
+        aria-label={reason}
+        style={{ display: 'inline-block' }}
+        onClick={(event) => event.stopPropagation()}
+      >
+        {children}
+      </span>
+    </Tooltip>
   );
 }
 
@@ -2262,8 +2712,11 @@ function ResourcePublishPanel({
   resourceParamLoading,
   resourceOptions,
   resourceLoading,
+  resourceAvailability,
   onLoadParamSchema,
   onLoadOptions,
+  onCheckAvailability,
+  onPendingResourceIssue,
   onValuesMutated,
 }: {
   agentName: string;
@@ -2272,8 +2725,11 @@ function ResourcePublishPanel({
   resourceParamLoading: Record<string, boolean>;
   resourceOptions: Record<string, DbgptResourceOption[]>;
   resourceLoading: Record<string, boolean>;
+  resourceAvailability: ResourceAvailabilityMap;
   onLoadParamSchema: (type: string) => void;
   onLoadOptions: (type: string) => void;
+  onCheckAvailability: (keys: string[]) => void;
+  onPendingResourceIssue: (agentName: string, issue?: string) => void;
   onValuesMutated: () => void;
 }) {
   const form = Form.useFormInstance<ConfigureFormValues>();
@@ -2303,6 +2759,13 @@ function ResourcePublishPanel({
           description: String(connector.config?.description || ''),
         }))
       : (resourceType ? resourceOptions[resourceType] : []) || [];
+  const selectedAvailability =
+    kind === 'database' && selectedKey?.startsWith('veadk:project:')
+      ? resourceAvailability[selectedKey]
+      : undefined;
+  const selectedUnavailable =
+    selectedAvailability?.state === 'checking' ||
+    selectedAvailability?.state === 'unavailable';
   const boundResources = (resources || [])
     .map((resource, index) => ({ resource, index }))
     .filter(({ resource }) => {
@@ -2322,6 +2785,38 @@ function ResourcePublishPanel({
     onLoadParamSchema(resourceType);
     if (kind !== 'tool') onLoadOptions(resourceType);
   }, [kind, onLoadOptions, onLoadParamSchema, resourceType]);
+
+  useEffect(() => {
+    if (kind === 'database' && selectedKey?.startsWith('veadk:project:')) {
+      onCheckAvailability([selectedKey]);
+    }
+  }, [kind, onCheckAvailability, selectedKey]);
+
+  useEffect(() => {
+    if (kind !== 'database' || !selectedKey?.startsWith('veadk:project:')) {
+      onPendingResourceIssue(agentName, undefined);
+      return;
+    }
+    if (
+      selectedAvailability?.state === 'checking' ||
+      selectedAvailability?.state === 'unavailable'
+    ) {
+      onPendingResourceIssue(
+        agentName,
+        selectedAvailability.detail ||
+          'Data product is unavailable in the current runtime.',
+      );
+      return;
+    }
+    onPendingResourceIssue(agentName, undefined);
+  }, [
+    agentName,
+    kind,
+    onPendingResourceIssue,
+    selectedAvailability?.detail,
+    selectedAvailability?.state,
+    selectedKey,
+  ]);
 
   const updateResources = (nextResources: DbgptAppResource[]) => {
     const currentDetails = form.getFieldValue('agent_details') || {};
@@ -2357,6 +2852,13 @@ function ResourcePublishPanel({
       message.warning(`Select a ${resourcePublishLabels[kind]}.`);
       return;
     }
+    if (selectedUnavailable) {
+      message.warning(
+        selectedAvailability?.detail ||
+          'Data product is unavailable in the current runtime.',
+      );
+      return;
+    }
     const option =
       kind === 'tool'
         ? (
@@ -2386,11 +2888,14 @@ function ResourcePublishPanel({
     });
     updateResources([...(resources || []), nextResource]);
     setSelectedKey(undefined);
+    onPendingResourceIssue(agentName, undefined);
     message.success(`${resourcePublishLabels[kind]} bound.`);
   };
 
   const removeBoundResource = (index: number) => {
-    updateResources((resources || []).filter((_, itemIndex) => itemIndex !== index));
+    updateResources(
+      (resources || []).filter((_, itemIndex) => itemIndex !== index),
+    );
   };
 
   if (!agentName) return null;
@@ -2439,7 +2944,9 @@ function ResourcePublishPanel({
                   >
                     <div className="d-flex align-center">
                       <ResourceIcon>
-                        {getResourceIcon(item === 'tool' ? 'tool(mcp(sse))' : item)}
+                        {getResourceIcon(
+                          item === 'tool' ? 'tool(mcp(sse))' : item,
+                        )}
                       </ResourceIcon>
                       <Text strong>{resourcePublishLabels[item]}</Text>
                     </div>
@@ -2482,10 +2989,12 @@ function ResourcePublishPanel({
                       label: item.label,
                       value: item.value,
                     }))
-                  : (selectableOptions as DbgptResourceOption[]).map((item) => ({
-                      label: item.label || item.key,
-                      value: item.key,
-                    }))
+                  : (selectableOptions as DbgptResourceOption[]).map(
+                      (item) => ({
+                        label: item.label || item.key,
+                        value: item.key,
+                      }),
+                    )
               }
               notFoundContent={
                 kind === 'tool'
@@ -2493,6 +3002,32 @@ function ResourcePublishPanel({
                   : 'No resources returned by the runtime.'
               }
             />
+            {selectedAvailability?.state === 'checking' && (
+              <Alert
+                className="mt-3"
+                type="info"
+                showIcon
+                message="Checking data product availability"
+                description={selectedAvailability.detail}
+              />
+            )}
+            {selectedAvailability?.state === 'unavailable' && (
+              <Alert
+                className="mt-3"
+                type="error"
+                showIcon
+                message="Data product unavailable"
+                description={selectedAvailability.detail}
+                action={
+                  <Button
+                    size="small"
+                    onClick={() => onCheckAvailability([selectedKey || ''])}
+                  >
+                    Refresh resources
+                  </Button>
+                }
+              />
+            )}
             {kind === 'tool' && !selectableConnectors.length && (
               <Alert
                 className="mt-3"
@@ -2511,7 +3046,7 @@ function ResourcePublishPanel({
               className="mt-3"
               type="primary"
               icon={<PlusOutlined />}
-              disabled={!resourceType || !selectedKey}
+              disabled={!resourceType || !selectedKey || selectedUnavailable}
               onClick={addBoundResource}
             >
               Bind resource
@@ -2522,15 +3057,23 @@ function ResourcePublishPanel({
             <DetailLabel>Bound resources</DetailLabel>
             {boundResources.length ? (
               boundResources.map(({ resource, index }) => (
-                <ResourceSummaryItem key={`${resource.type}-${resource.name}-${index}`}>
+                <ResourceSummaryItem
+                  key={`${resource.type}-${resource.name}-${index}`}
+                >
                   <ResourceIcon>{getResourceIcon(resource.type)}</ResourceIcon>
                   <div style={{ minWidth: 0 }}>
                     <Text strong ellipsis>
                       {resource.name || resource.type}
                     </Text>
-                    <DetailLabel>{String(getResourcePrimaryValue(resource))}</DetailLabel>
+                    <DetailLabel>
+                      {String(getResourcePrimaryValue(resource))}
+                    </DetailLabel>
                   </div>
-                  <Button size="small" danger onClick={() => removeBoundResource(index)}>
+                  <Button
+                    size="small"
+                    danger
+                    onClick={() => removeBoundResource(index)}
+                  >
                     Remove
                   </Button>
                 </ResourceSummaryItem>
@@ -2557,8 +3100,11 @@ function AgentConfiguration({
   resourceParamLoading,
   resourceOptions,
   resourceLoading,
+  resourceAvailability,
   onLoadParamSchema,
   onLoadOptions,
+  onCheckAvailability,
+  onPendingResourceIssue,
   onValuesMutated,
 }: {
   app: DbgptApp;
@@ -2567,8 +3113,11 @@ function AgentConfiguration({
   resourceParamLoading: Record<string, boolean>;
   resourceOptions: Record<string, DbgptResourceOption[]>;
   resourceLoading: Record<string, boolean>;
+  resourceAvailability: ResourceAvailabilityMap;
   onLoadParamSchema: (type: string) => void;
   onLoadOptions: (type: string) => void;
+  onCheckAvailability: (keys: string[]) => void;
+  onPendingResourceIssue: (agentName: string, issue?: string) => void;
   onValuesMutated: () => void;
 }) {
   const form = Form.useFormInstance<ConfigureFormValues>();
@@ -2707,8 +3256,11 @@ function AgentConfiguration({
                   resourceParamLoading={resourceParamLoading}
                   resourceOptions={resourceOptions}
                   resourceLoading={resourceLoading}
+                  resourceAvailability={resourceAvailability}
                   onLoadParamSchema={onLoadParamSchema}
                   onLoadOptions={onLoadOptions}
+                  onCheckAvailability={onCheckAvailability}
+                  onPendingResourceIssue={onPendingResourceIssue}
                   onValuesMutated={onValuesMutated}
                 />
                 <Form.Item
@@ -2873,8 +3425,8 @@ function AwelConfiguration({ catalog }: { catalog: CatalogState }) {
         <Alert
           type="warning"
           showIcon
-          message="No AWEL workflows available"
-          description="Create or import a workflow in the Workflow section before publishing an AWEL application."
+          message="No deployed workflow available"
+          description="Create or deploy a workflow before publishing a workflow application."
           action={
             <Link href={Path.Workflow}>
               <Button size="small">Open workflow</Button>
@@ -3116,39 +3668,66 @@ function RecommendQuestionsEditor() {
 function ApplicationBuildSteps({
   app,
   teamModes,
+  availability,
+  catalog,
+  dirty,
 }: {
   app: DbgptApp;
   teamModes: DbgptTeamMode[];
+  availability?: ResourceAvailabilityMap;
+  catalog?: CatalogState;
+  dirty?: boolean;
 }) {
   const hasBaseInfo = Boolean(app.app_name && app.team_mode);
   const configured = getAppCompleteness(app);
   const runtimeReady = getAppRuntimeReady(app);
   const published = isPublished(app);
-  const callable = runtimeReady && published;
+  const preflightIssues = getResourcePreflightIssues(
+    app,
+    availability || {},
+    catalog || emptyCatalog,
+  );
+  const saved = !dirty;
+  const canPublish = saved && runtimeReady && !preflightIssues.length;
+  const callable = canPublish && published;
   const steps = [
     {
-      title: 'Base info',
+      title: 'Basic info',
       detail: getModeLabel(app.team_mode, teamModes),
       done: hasBaseInfo,
       active: !hasBaseInfo,
     },
     {
-      title: 'Work mode config',
-      detail: getWorkModeConfigLabel(app),
-      done: configured,
+      title: 'Work mode',
+      detail: app.team_mode
+        ? getModeConfigurationTarget(app.team_mode)
+        : 'Choose a work mode',
+      done: Boolean(app.team_mode),
+      active: hasBaseInfo && !app.team_mode,
+    },
+    {
+      title: 'Bind resources',
+      detail: preflightIssues[0] || getWorkModeConfigLabel(app),
+      done: configured && !preflightIssues.length,
       active: hasBaseInfo && !configured,
+    },
+    {
+      title: 'Save',
+      detail: saved ? 'Configuration saved' : 'Unsaved changes',
+      done: saved,
+      active: configured && dirty,
     },
     {
       title: 'Publish',
       detail: published ? 'Published to runtime' : 'Not published',
       done: published,
-      active: runtimeReady && !published,
+      active: canPublish && !published,
     },
     {
-      title: 'Invoke',
+      title: 'Run',
       detail: callable
         ? 'Chat/API available'
-        : runtimeReady
+        : canPublish
           ? 'Waiting for publish'
           : 'Waiting for runtime context',
       done: callable,
@@ -3171,15 +3750,27 @@ function ApplicationBuildSteps({
 function ApplicationLifecyclePanel({
   app,
   teamModes,
+  availability,
+  catalog,
+  dirty,
 }: {
   app: DbgptApp;
   teamModes: DbgptTeamMode[];
+  availability: ResourceAvailabilityMap;
+  catalog: CatalogState;
+  dirty: boolean;
 }) {
   const mode = app.team_mode || '';
   const configured = getAppCompleteness(app);
   const runtimeReady = getAppRuntimeReady(app);
   const published = isPublished(app);
-  const callable = runtimeReady && published;
+  const preflightIssues = getResourcePreflightIssues(
+    app,
+    availability,
+    catalog,
+  );
+  const callable =
+    runtimeReady && published && !dirty && !preflightIssues.length;
   const resources = getApplicationResources(app);
   const nativeResource = getNativeResourceSummary(app);
   const runtimeRoute = getApplicationRuntimeRoute(app);
@@ -3204,9 +3795,10 @@ function ApplicationLifecyclePanel({
       title: 'Publish',
       detail: published
         ? 'Visible from the application entry'
-        : 'Required before users can start a conversation',
+        : preflightIssues[0] ||
+          'Required before users can start a conversation',
       done: published,
-      active: runtimeReady && !published,
+      active: runtimeReady && !published && !preflightIssues.length,
     },
     {
       title: 'Start conversation',
@@ -3260,7 +3852,11 @@ function ApplicationLifecyclePanel({
             <Text className="gray-7">Resources used when users ask.</Text>
           </div>
           <Tag color={runtimeReady ? 'green' : 'orange'}>
-            {runtimeReady ? 'Ready' : 'Needs setup'}
+            {preflightIssues.length
+              ? 'Unavailable'
+              : runtimeReady
+                ? 'Ready'
+                : 'Needs setup'}
           </Tag>
         </PanelTitle>
 
@@ -3313,7 +3909,9 @@ function ApplicationLifecyclePanel({
         ) : mode === 'native_app' ? (
           nativeResource ? (
             <ResourceSummaryItem>
-              <ResourceIcon>{getResourceIcon(nativeResource.type)}</ResourceIcon>
+              <ResourceIcon>
+                {getResourceIcon(nativeResource.type)}
+              </ResourceIcon>
               <div style={{ minWidth: 0 }}>
                 <Text strong>{getChatScene(app)}</Text>
                 <DetailLabel>{nativeResource.value}</DetailLabel>
@@ -3803,6 +4401,89 @@ export default function Applications() {
     null,
   );
   const [configureDirty, setConfigureDirty] = useState(false);
+  const [pendingResourceIssues, setPendingResourceIssues] = useState<
+    Record<string, string>
+  >({});
+  const [resourceAvailability, setResourceAvailability] =
+    useState<ResourceAvailabilityMap>({});
+
+  const checkAvailabilityKeys = useCallback((keys: string[]) => {
+    const uniqueKeys = Array.from(new Set(keys)).filter(
+      (key) => key && key.startsWith('veadk:project:'),
+    );
+    if (!uniqueKeys.length) return;
+    uniqueKeys.forEach((key) => {
+      setResourceAvailability((current) => {
+        if (current[key]?.state === 'available') return current;
+        return {
+          ...current,
+          [key]: {
+            state: 'checking',
+            label: key,
+            detail: `Checking ${key}.`,
+          },
+        };
+      });
+      const projectId = key.replace('veadk:project:', '');
+      fetch(
+        `/api/applications/data-products/${encodeURIComponent(
+          projectId,
+        )}?preflight=1`,
+      )
+        .then(async (response) => {
+          const payload = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            throw new Error(
+              payload?.error ||
+                `Data product ${projectId} is unavailable in the current runtime.`,
+            );
+          }
+          if (payload?.available === false) {
+            throw new Error(
+              payload?.error ||
+                `Data product ${projectId} is unavailable in the current runtime.`,
+            );
+          }
+          setResourceAvailability((current) => ({
+            ...current,
+            [key]: {
+              state: 'available',
+              label: payload?.displayName || key,
+              detail: `Data product ${payload?.displayName || projectId} is available.`,
+            },
+          }));
+        })
+        .catch((err) => {
+          setResourceAvailability((current) => ({
+            ...current,
+            [key]: {
+              state: 'unavailable',
+              label: key,
+              detail:
+                err instanceof Error
+                  ? `Data product is unavailable in the current runtime. ${err.message}`
+                  : 'Data product is unavailable in the current runtime.',
+            },
+          }));
+        });
+    });
+  }, []);
+
+  const refreshAppResourcePreflight = useCallback(
+    (targetApp: DbgptApp) => {
+      const keys = getAppAvailabilityKeys(targetApp);
+      if (!keys.length) return;
+      setResourceAvailability((current) => {
+        const next = { ...current };
+        keys.forEach((key) => {
+          if (key.startsWith('veadk:project:')) delete next[key];
+        });
+        return next;
+      });
+      checkAvailabilityKeys(keys);
+    },
+    [checkAvailabilityKeys],
+  );
   const loadTeamModes = useCallback(async () => {
     setTeamModesLoading(true);
     setTeamModeError(null);
@@ -4043,6 +4724,16 @@ export default function Applications() {
     loadCatalog();
   }, [loadCatalog]);
 
+  useEffect(() => {
+    const keys = apps.flatMap(getAppAvailabilityKeys);
+    checkAvailabilityKeys(keys);
+  }, [apps, checkAvailabilityKeys]);
+
+  useEffect(() => {
+    if (!configureDraftApp) return;
+    checkAvailabilityKeys(getAppAvailabilityKeys(configureDraftApp));
+  }, [checkAvailabilityKeys, configureDraftApp]);
+
   const openCreateModal = () => {
     setModalMode('create');
     setEditingApp(null);
@@ -4074,6 +4765,7 @@ export default function Applications() {
     if (app.app_code) {
       setApplicationConfigureUrlState(app.app_code);
     }
+    setPendingResourceIssues({});
     setConfiguringApp(app);
     try {
       const needsCatalog =
@@ -4131,6 +4823,16 @@ export default function Applications() {
 
   const startChat = async (app: DbgptApp) => {
     const fullApp = await fetchAppInfo(app).catch(() => app);
+    const preflightIssues = getResourcePreflightIssues(
+      fullApp,
+      resourceAvailability,
+      catalog,
+    );
+    if (preflightIssues.length) {
+      message.warning(preflightIssues[0]);
+      openConfigure(fullApp);
+      return;
+    }
     if (!isPublished(fullApp)) {
       message.warning('Publish this application before chat.');
       return;
@@ -4280,6 +4982,15 @@ export default function Applications() {
       catalog,
       resourceParamSchemas,
     );
+    const draftForPreflight: DbgptApp = { ...app, ...payload };
+    const preflightIssues = getResourcePreflightIssues(
+      draftForPreflight,
+      resourceAvailability,
+      catalog,
+    );
+    if (preflightIssues.length) {
+      throw new Error(preflightIssues[0]);
+    }
     await fetchDbgpt<boolean>('/api/v1/app/edit', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -4342,6 +5053,18 @@ export default function Applications() {
       );
       openConfigure(targetApp);
       return;
+    }
+    if (!isPublished(targetApp)) {
+      const preflightIssues = getResourcePreflightIssues(
+        targetApp,
+        resourceAvailability,
+        catalog,
+      );
+      if (preflightIssues.length) {
+        message.warning(preflightIssues[0]);
+        openConfigure(targetApp);
+        return;
+      }
     }
     const published = isPublished(app);
     const operation = published ? 'unpublish' : 'publish';
@@ -4428,7 +5151,19 @@ export default function Applications() {
 
   const renderAppMenu = (app: DbgptApp) => {
     const published = isPublished(app);
-    const callable = getAppRuntimeReady(app) && published;
+    const startDisabledReason = getActionDisabledReason({
+      app,
+      action: 'start',
+      availability: resourceAvailability,
+      catalog,
+    });
+    const publishDisabledReason = getActionDisabledReason({
+      app,
+      action: 'publish',
+      availability: resourceAvailability,
+      catalog,
+    });
+    const callable = !startDisabledReason;
     return (
       <Menu
         onClick={(info) => {
@@ -4464,7 +5199,7 @@ export default function Applications() {
         <Menu.Item
           key="publish"
           icon={published ? <StopOutlined /> : <RocketOutlined />}
-          disabled={!published && !canPublishApp(app)}
+          disabled={!published && Boolean(publishDisabledReason)}
         >
           {published ? 'Unpublish' : 'Publish'}
         </Menu.Item>
@@ -4478,13 +5213,37 @@ export default function Applications() {
 
   if (configuringApp) {
     const previewApp = configureDraftApp || configuringApp;
-    const callable =
-      getAppRuntimeReady(previewApp) &&
-      isPublished(configuringApp) &&
-      !configureDirty;
+    const pendingResourceReason = Object.values(pendingResourceIssues)[0];
+    const saveDisabledReason =
+      pendingResourceReason ||
+      getActionDisabledReason({
+        app: previewApp,
+        action: 'save',
+        availability: resourceAvailability,
+        catalog,
+      });
+    const publishDisabledReason =
+      pendingResourceReason ||
+      getActionDisabledReason({
+        app: previewApp,
+        action: 'publish',
+        dirty: configureDirty,
+        availability: resourceAvailability,
+        catalog,
+      });
+    const runDisabledReason =
+      pendingResourceReason ||
+      getActionDisabledReason({
+        app: previewApp,
+        action: 'start',
+        dirty: configureDirty,
+        availability: resourceAvailability,
+        catalog,
+      });
+    const callable = !runDisabledReason;
     const operation = isPublished(configuringApp) ? 'unpublish' : 'publish';
     const publishDisabled =
-      !isPublished(configuringApp) && !canPublishApp(previewApp);
+      !isPublished(configuringApp) && Boolean(publishDisabledReason);
     return (
       <ConstructLayout
         activeKey="applications"
@@ -4500,43 +5259,61 @@ export default function Applications() {
                 setConfiguringApp(null);
                 setConfigureDraftApp(null);
                 setConfigureDirty(false);
+                setPendingResourceIssues({});
                 clearApplicationUrlState();
                 configureForm.resetFields();
               }}
             >
               Back to apps
             </Button>
-            <Button
-              type="primary"
-              loading={savingConfig}
-              onClick={saveConfiguration}
-            >
-              Save
-            </Button>
-            <Button
-              icon={
-                isPublished(configuringApp) ? (
-                  <StopOutlined />
-                ) : (
-                  <RocketOutlined />
-                )
+            <Tooltip title={saveDisabledReason || ''}>
+              <span>
+                <Button
+                  type="primary"
+                  loading={savingConfig}
+                  disabled={Boolean(saveDisabledReason)}
+                  onClick={saveConfiguration}
+                >
+                  Save
+                </Button>
+              </span>
+            </Tooltip>
+            <Tooltip
+              title={
+                !isPublished(configuringApp) ? publishDisabledReason || '' : ''
               }
-              loading={
-                actionLoading === `${operation}:${configuringApp.app_code}`
-              }
-              disabled={publishDisabled}
-              onClick={() => operateApp(configuringApp)}
             >
-              {isPublished(configuringApp) ? 'Unpublish' : 'Publish'}
-            </Button>
-            <Button
-              icon={<SendOutlined />}
-              disabled={!callable}
-              loading={actionLoading === `chat:${configuringApp.app_code}`}
-              onClick={() => startChat(configuringApp)}
-            >
-              Run
-            </Button>
+              <span>
+                <Button
+                  icon={
+                    isPublished(configuringApp) ? (
+                      <StopOutlined />
+                    ) : (
+                      <RocketOutlined />
+                    )
+                  }
+                  loading={
+                    actionLoading === `${operation}:${configuringApp.app_code}`
+                  }
+                  disabled={publishDisabled}
+                  onClick={() => operateApp(configuringApp)}
+                >
+                  {isPublished(configuringApp) ? 'Unpublish' : 'Publish'}
+                </Button>
+              </span>
+            </Tooltip>
+            <Tooltip title={runDisabledReason || ''}>
+              <span>
+                <Button
+                  icon={<SendOutlined />}
+                  disabled={!callable}
+                  loading={actionLoading === `chat:${configuringApp.app_code}`}
+                  onClick={() => startChat(configuringApp)}
+                >
+                  Run
+                </Button>
+              </span>
+            </Tooltip>
           </>
         }
       >
@@ -4568,22 +5345,33 @@ export default function Applications() {
               >
                 Edit base info
               </Button>
-              <Button
-                icon={
-                  isPublished(configuringApp) ? (
-                    <StopOutlined />
-                  ) : (
-                    <RocketOutlined />
-                  )
+              <Tooltip
+                title={
+                  !isPublished(configuringApp)
+                    ? publishDisabledReason || ''
+                    : ''
                 }
-                loading={
-                  actionLoading === `${operation}:${configuringApp.app_code}`
-                }
-                disabled={publishDisabled}
-                onClick={() => operateApp(configuringApp)}
               >
-                {isPublished(configuringApp) ? 'Unpublish' : 'Publish'}
-              </Button>
+                <span>
+                  <Button
+                    icon={
+                      isPublished(configuringApp) ? (
+                        <StopOutlined />
+                      ) : (
+                        <RocketOutlined />
+                      )
+                    }
+                    loading={
+                      actionLoading ===
+                      `${operation}:${configuringApp.app_code}`
+                    }
+                    disabled={publishDisabled}
+                    onClick={() => operateApp(configuringApp)}
+                  >
+                    {isPublished(configuringApp) ? 'Unpublish' : 'Publish'}
+                  </Button>
+                </span>
+              </Tooltip>
               <Button
                 icon={<ShareAltOutlined />}
                 disabled={!callable}
@@ -4593,7 +5381,32 @@ export default function Applications() {
               </Button>
             </FooterActions>
           </ConfigureHeader>
-          <ApplicationBuildSteps app={previewApp} teamModes={teamModes} />
+          <ApplicationBuildSteps
+            app={previewApp}
+            teamModes={teamModes}
+            availability={resourceAvailability}
+            catalog={catalog}
+            dirty={configureDirty}
+          />
+          {runDisabledReason && (
+            <Alert
+              className="mt-4"
+              type={
+                runDisabledReason.includes('unavailable') ? 'error' : 'info'
+              }
+              showIcon
+              message="Current runtime status"
+              description={runDisabledReason}
+              action={
+                <Button
+                  size="small"
+                  onClick={() => refreshAppResourcePreflight(previewApp)}
+                >
+                  Refresh resources
+                </Button>
+              }
+            />
+          )}
           {configureDirty && (
             <Alert
               className="mt-4"
@@ -4633,14 +5446,12 @@ export default function Applications() {
                     <BuilderIntroHeader>
                       <div>
                         <Title level={5} className="mb-0">
-                          {getModeConfigurationTarget(
-                            configuringApp.team_mode,
-                          )}
+                          {getModeConfigurationTarget(configuringApp.team_mode)}
                         </Title>
                         <Text className="gray-7">
                           Database, knowledge, and tool resources can be
-                          published directly as lightweight apps. Workflow
-                          mode publishes a compound app after the Workflow page
+                          published directly as lightweight apps. Workflow mode
+                          publishes a compound app after the Workflow page
                           composes multiple resources.
                         </Text>
                       </div>
@@ -4660,8 +5471,21 @@ export default function Applications() {
                       resourceParamLoading={resourceParamLoading}
                       resourceOptions={resourceOptions}
                       resourceLoading={resourceLoading}
+                      resourceAvailability={resourceAvailability}
                       onLoadParamSchema={loadResourceParamSchema}
                       onLoadOptions={loadResourceOptions}
+                      onCheckAvailability={checkAvailabilityKeys}
+                      onPendingResourceIssue={(agentName, issue) => {
+                        setPendingResourceIssues((current) => {
+                          const next = { ...current };
+                          if (issue) {
+                            next[agentName] = issue;
+                          } else {
+                            delete next[agentName];
+                          }
+                          return next;
+                        });
+                      }}
                       onValuesMutated={updateConfigureDraft}
                     />
                   )}
@@ -4682,6 +5506,9 @@ export default function Applications() {
                   <ApplicationLifecyclePanel
                     app={previewApp}
                     teamModes={teamModes}
+                    availability={resourceAvailability}
+                    catalog={catalog}
+                    dirty={configureDirty}
                   />
                   <ApplicationConfigNotice app={previewApp} />
                   <ApplicationInvocationPanel
@@ -4705,30 +5532,30 @@ export default function Applications() {
       description="Create DB-GPT applications locally in VeADK, configure their work mode, publish them, then expose chat and API invocation."
       loading={loading && apps.length === 0}
       actions={
-        <Button
-          type="primary"
+        <StudioButton
+          $variant="gradient"
           icon={<PlusOutlined />}
           onClick={openCreateModal}
         >
           Create application
-        </Button>
+        </StudioButton>
       }
     >
       <ConstructToolbar
         left={
           <>
             {tabOptions.map((option) => (
-              <Button
+              <FilterButton
                 key={option.value}
                 size="small"
-                type={activeKey === option.value ? 'primary' : 'default'}
+                $active={activeKey === option.value}
                 onClick={() => {
                   setActiveKey(option.value);
                   setPage(1);
                 }}
               >
                 {option.label}
-              </Button>
+              </FilterButton>
             ))}
             <Input.Search
               allowClear
@@ -4756,13 +5583,13 @@ export default function Applications() {
             title="No applications"
             description="Create a DB-GPT application, configure its work mode, then publish it before users can run it."
             action={
-              <Button
-                type="primary"
+              <StudioButton
+                $variant="gradient"
                 icon={<PlusOutlined />}
                 onClick={openCreateModal}
               >
                 Create application
-              </Button>
+              </StudioButton>
             }
           />
         ) : (
@@ -4770,15 +5597,33 @@ export default function Applications() {
             <AppGrid>
               {apps.map((app) => {
                 const published = isPublished(app);
-                const callable = getAppRuntimeReady(app) && published;
-                const canPublishFromCard = !published && canPublishApp(app);
-                const runtimeStatus = getApplicationRuntimeStatus(app);
+                const startDisabledReason = getActionDisabledReason({
+                  app,
+                  action: 'start',
+                  availability: resourceAvailability,
+                  catalog,
+                });
+                const publishDisabledReason = getActionDisabledReason({
+                  app,
+                  action: 'publish',
+                  availability: resourceAvailability,
+                  catalog,
+                });
+                const callable = !startDisabledReason;
+                const canPublishFromCard = !published && !publishDisabledReason;
+                const runtimeStatus = getApplicationRuntimeStatus(
+                  app,
+                  resourceAvailability,
+                  catalog,
+                );
                 const bindings = getApplicationResourceBindings(app);
-                const appUrl = getApplicationShareUrl(app);
                 const questions = getRecommendQuestions(app)
                   .filter((item) => item.valid !== false && item.question)
-                  .slice(0, 2);
+                  .slice(0, 1);
                 const updatedAt = getDisplayDate(app.updated_at);
+                const resourcePreview = bindings.slice(0, 2);
+                const statusDetail =
+                  runtimeStatus.detail || getAppActionHint(app);
                 return (
                   <AppCard
                     key={app.app_code}
@@ -4793,6 +5638,7 @@ export default function Applications() {
                       }
                     }}
                   >
+                    <AppCardWash />
                     <AppHeader>
                       <AppIcon>{getAppIcon(app.team_mode)}</AppIcon>
                       <div style={{ minWidth: 0 }}>
@@ -4810,52 +5656,72 @@ export default function Applications() {
                         </AppMeta>
                       </div>
                     </AppHeader>
-                    <Paragraph
-                      className="gray-7 mt-4 mb-0"
-                      ellipsis={{ rows: 3 }}
-                    >
+                    <AppDescription ellipsis={{ rows: 2 }}>
                       {app.app_describe || 'No description.'}
-                    </Paragraph>
+                    </AppDescription>
 
                     <CardSection>
                       <DetailLabel>Bound resources</DetailLabel>
                       {bindings.length ? (
                         <MiniResourceList>
-                          {bindings.slice(0, 3).map((binding) => (
+                          {resourcePreview.map((binding) => (
                             <MiniResourceItem key={binding.key}>
-                              <ResourceIcon>{getResourceIcon(binding.type)}</ResourceIcon>
+                              <ResourceIcon>
+                                {getResourceIcon(binding.type)}
+                              </ResourceIcon>
                               <div style={{ minWidth: 0 }}>
-                                <Text strong ellipsis>
+                                <ResourceName title={binding.label}>
                                   {binding.label}
-                                </Text>
-                                <DetailLabel>{binding.owner}</DetailLabel>
+                                </ResourceName>
+                                <ResourceMeta>
+                                  <span title={binding.owner}>
+                                    {binding.owner || 'owner unset'}
+                                  </span>
+                                  <Tag>{binding.type}</Tag>
+                                </ResourceMeta>
                               </div>
-                              <Tag style={{ marginRight: 0 }}>{binding.type}</Tag>
                             </MiniResourceItem>
                           ))}
+                          {bindings.length > resourcePreview.length && (
+                            <ResourceOverflow>
+                              +{bindings.length - resourcePreview.length} more
+                              resource
+                              {bindings.length - resourcePreview.length > 1
+                                ? 's'
+                                : ''}
+                            </ResourceOverflow>
+                          )}
                         </MiniResourceList>
                       ) : (
-                        <Alert
-                          type="info"
-                          showIcon
-                          message="No resources bound"
-                        />
+                        <EmptyResourceHint>
+                          No resources bound. Configure this application before
+                          publishing.
+                        </EmptyResourceHint>
                       )}
                     </CardSection>
 
                     <CardSection>
-                      <RuntimeLine>
-                        <ShareAltOutlined />
-                        <Text ellipsis copyable={callable ? { text: appUrl } : false}>
-                          {callable ? appUrl : 'Publish to create a runtime entry'}
-                        </Text>
-                      </RuntimeLine>
-                      <RuntimeLine>
-                        <RocketOutlined />
-                        <Text ellipsis>
-                          {runtimeStatus.detail || getAppActionHint(app)}
-                        </Text>
-                      </RuntimeLine>
+                      <StatusPanel $tone={runtimeStatus.tone}>
+                        <div style={{ minWidth: 0 }}>
+                          <StatusTitle>{runtimeStatus.label}</StatusTitle>
+                          <StatusDescription title={statusDetail}>
+                            {statusDetail}
+                          </StatusDescription>
+                        </div>
+                        {runtimeStatus.tone === 'error' && (
+                          <StudioButton
+                            size="small"
+                            $variant="soft"
+                            icon={<ReloadOutlined />}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              refreshAppResourcePreflight(app);
+                            }}
+                          >
+                            Refresh
+                          </StudioButton>
+                        )}
+                      </StatusPanel>
                     </CardSection>
 
                     {questions.length > 0 && (
@@ -4870,26 +5736,29 @@ export default function Applications() {
                     )}
 
                     <AppFooter>
-                      <Text className="gray-7 text-sm">
+                      <FooterMeta>
                         {app.owner_name || 'owner unset'}
                         {updatedAt ? ` · ${updatedAt}` : ''}
-                      </Text>
+                      </FooterMeta>
                       <FooterActions>
-                        <Button
+                        <ActionButtonWithReason reason={startDisabledReason}>
+                          <StudioButton
+                            size="small"
+                            $variant="gradient"
+                            icon={<SendOutlined />}
+                            disabled={!callable}
+                            loading={actionLoading === `chat:${app.app_code}`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              startChat(app);
+                            }}
+                          >
+                            Start
+                          </StudioButton>
+                        </ActionButtonWithReason>
+                        <StudioButton
                           size="small"
-                          type="primary"
-                          icon={<SendOutlined />}
-                          disabled={!callable}
-                          loading={actionLoading === `chat:${app.app_code}`}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            startChat(app);
-                          }}
-                        >
-                          Start
-                        </Button>
-                        <Button
-                          size="small"
+                          $variant="soft"
                           icon={<AppstoreOutlined />}
                           onClick={(event) => {
                             event.stopPropagation();
@@ -4897,29 +5766,40 @@ export default function Applications() {
                           }}
                         >
                           Configure
-                        </Button>
-                        <Button
-                          size="small"
-                          icon={published ? <StopOutlined /> : <RocketOutlined />}
-                          disabled={!published && !canPublishFromCard}
-                          loading={
-                            actionLoading === `${
-                              published ? 'unpublish' : 'publish'
-                            }:${app.app_code}`
+                        </StudioButton>
+                        <ActionButtonWithReason
+                          reason={
+                            !published ? publishDisabledReason : undefined
                           }
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            operateApp(app);
-                          }}
                         >
-                          {published ? 'Unpublish' : 'Publish'}
-                        </Button>
+                          <StudioButton
+                            size="small"
+                            $variant="soft"
+                            icon={
+                              published ? <StopOutlined /> : <RocketOutlined />
+                            }
+                            disabled={!published && !canPublishFromCard}
+                            loading={
+                              actionLoading ===
+                              `${
+                                published ? 'unpublish' : 'publish'
+                              }:${app.app_code}`
+                            }
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              operateApp(app);
+                            }}
+                          >
+                            {published ? 'Unpublish' : 'Publish'}
+                          </StudioButton>
+                        </ActionButtonWithReason>
                         <Dropdown
                           overlay={renderAppMenu(app)}
                           trigger={['click']}
                         >
-                          <Button
+                          <StudioButton
                             size="small"
+                            $variant="soft"
                             icon={<EllipsisOutlined />}
                             onClick={(event) => event.stopPropagation()}
                           />

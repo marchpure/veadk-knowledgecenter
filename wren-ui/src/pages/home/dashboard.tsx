@@ -12,6 +12,7 @@ import DashboardHeader from '@/components/pages/home/dashboardGrid/DashboardHead
 import CacheSettingsDrawer, {
   Schedule,
 } from '@/components/pages/home/dashboardGrid/CacheSettingsDrawer';
+import HomeProjectReturn from '@/components/pages/home/HomeProjectReturn';
 import {
   useDashboardQuery,
   useDeleteDashboardItemMutation,
@@ -34,6 +35,9 @@ const isSupportCachedSettings = (dataSource: DataSource) => {
 
 export default function Dashboard() {
   const router = useRouter();
+  const projectId = Array.isArray(router.query.projectId)
+    ? router.query.projectId[0]
+    : router.query.projectId;
   const dashboardGridRef = useRef<{ onRefreshAll: () => void }>(null);
   const homeSidebar = useHomeSidebar();
   const cacheSettingsDrawer = useDrawerAction();
@@ -104,7 +108,13 @@ export default function Dashboard() {
   };
 
   return (
-    <SiderLayout loading={false} color="gray-3" sidebar={homeSidebar}>
+    <SiderLayout
+      loading={false}
+      color="gray-3"
+      sidebar={homeSidebar}
+      sidebarTop={<HomeProjectReturn />}
+      hideSidebarAuxiliaryActions={Boolean(projectId)}
+    >
       <LoadingWrapper loading={loading}>
         <>
           <EmptyDashboard show={dashboardItems.length === 0}>

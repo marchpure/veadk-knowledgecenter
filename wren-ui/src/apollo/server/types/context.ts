@@ -1,4 +1,5 @@
 import { IConfig } from '@server/config';
+import { NextApiRequest } from 'next';
 import {
   IIbisAdaptor,
   IWrenAIAdaptor,
@@ -42,6 +43,8 @@ import { ISqlPairService } from '../services/sqlPairService';
 
 export interface IContext {
   config: IConfig;
+  request?: NextApiRequest;
+  requestProjectId?: number;
   // telemetry
   telemetry: ITelemetry;
 

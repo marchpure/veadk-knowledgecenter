@@ -1,10 +1,12 @@
 export interface CreateModelData {
+  projectId?: number;
   sourceTableName: string;
   fields: [string];
   primaryKey: string;
 }
 
 export interface UpdateModelData {
+  projectId?: number;
   fields: [string];
   primaryKey: string;
 }

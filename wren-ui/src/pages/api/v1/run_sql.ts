@@ -11,6 +11,7 @@ import {
   handleApiError,
 } from '@/apollo/server/utils/apiUtils';
 import { transformToObjects } from '@server/utils/dataUtils';
+import { withApiProjectScope } from '@/server/apiProjectScope';
 
 const logger = getLogger('API_RUN_SQL');
 logger.level = 'debug';
@@ -38,10 +39,7 @@ interface RunSqlRequest {
   limit?: number;
 }
 
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse,
-) {
+async function handler(req: NextApiRequest, res: NextApiResponse) {
   const { sql, threadId, limit = 1000 } = req.body as RunSqlRequest;
   const startTime = Date.now();
   let project;
@@ -130,3 +128,5 @@ export default async function handler(
     });
   }
 }
+
+export default withApiProjectScope(handler);

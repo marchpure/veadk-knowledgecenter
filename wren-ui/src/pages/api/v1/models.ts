@@ -8,16 +8,14 @@ import {
   handleApiError,
 } from '@/apollo/server/utils/apiUtils';
 import { getLogger } from '@server/utils';
+import { withApiProjectScope } from '@/server/apiProjectScope';
 
 const logger = getLogger('API_MODELS');
 logger.level = 'debug';
 
 const { projectService, deployService } = components;
 
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse,
-) {
+async function handler(req: NextApiRequest, res: NextApiResponse) {
   const startTime = Date.now();
   let project;
 
@@ -74,3 +72,5 @@ export default async function handler(
     });
   }
 }
+
+export default withApiProjectScope(handler);

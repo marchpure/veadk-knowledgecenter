@@ -2,6 +2,7 @@ import type { NextApiRequest, NextApiResponse } from 'next';
 import { components } from '@/common';
 import { ThreadResponseAnswerStatus } from '@/apollo/server/services/askingService';
 import { TelemetryEvent } from '@/apollo/server/telemetry/telemetry';
+import { withApiProjectScope } from '@/server/apiProjectScope';
 
 const { wrenAIAdaptor, askingService, telemetry } = components;
 
@@ -29,10 +30,7 @@ class ContentMap {
 
 const contentMap = new ContentMap();
 
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse,
-) {
+async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== 'GET') {
     res.status(405).json({ error: 'Method Not Allowed' });
     return;
@@ -160,3 +158,5 @@ export default async function handler(
     res.status(500).end();
   }
 }
+
+export default withApiProjectScope(handler);

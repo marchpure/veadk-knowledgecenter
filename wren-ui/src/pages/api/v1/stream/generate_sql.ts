@@ -25,6 +25,7 @@ import {
   getSqlGenerationState,
   endStream,
 } from '@/apollo/server/utils';
+import { withApiProjectScope } from '@/server/apiProjectScope';
 
 const logger = getLogger('API_STREAM_GENERATE_SQL');
 logger.level = 'debug';
@@ -32,10 +33,7 @@ logger.level = 'debug';
 const { apiHistoryRepository, projectService, deployService, wrenAIAdaptor } =
   components;
 
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse,
-) {
+async function handler(req: NextApiRequest, res: NextApiResponse) {
   const { question, language, threadId } = req.body as AsyncAskRequest;
   const startTime = Date.now();
   let project;
@@ -199,3 +197,5 @@ export default async function handler(
     endStream(res, threadId || uuidv4(), startTime);
   }
 }
+
+export default withApiProjectScope(handler);

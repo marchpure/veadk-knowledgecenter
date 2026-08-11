@@ -188,7 +188,7 @@ export class ProjectResolver {
       const project = await ctx.projectService.getCurrentProject();
 
       // list all the tables in the data source
-      const tables = await this.listDataSourceTables(_root, _arg, ctx);
+      const tables = await this.listDataSourceTables(_root, {}, ctx);
       const tableNames = tables.map((table) => table.name);
 
       // save tables as model and modelColumns
@@ -381,8 +381,26 @@ export class ProjectResolver {
     };
   }
 
-  public async listDataSourceTables(_root: any, _arg, ctx: IContext) {
-    return await ctx.projectService.getProjectDataSourceTables();
+  private async getScopedProject(
+    projectId: number | null | undefined,
+    ctx: IContext,
+  ) {
+    const project = projectId
+      ? await ctx.projectService.getProjectById(projectId)
+      : await ctx.projectService.getCurrentProject();
+    if (!project) {
+      throw new Error(`Project ${projectId} not found`);
+    }
+    return project;
+  }
+
+  public async listDataSourceTables(
+    _root: any,
+    arg: { projectId?: number },
+    ctx: IContext,
+  ) {
+    const project = await this.getScopedProject(arg.projectId, ctx);
+    return await ctx.projectService.getProjectDataSourceTables(project);
   }
 
   public async saveTables(
@@ -525,8 +543,12 @@ export class ProjectResolver {
     }
   }
 
-  public async getSchemaChange(_root: any, _arg: any, ctx: IContext) {
-    const project = await ctx.projectService.getCurrentProject();
+  public async getSchemaChange(
+    _root: any,
+    arg: { projectId?: number },
+    ctx: IContext,
+  ) {
+    const project = await this.getScopedProject(arg.projectId, ctx);
     const lastSchemaChange =
       await ctx.schemaChangeRepository.findLastSchemaChange(project.id);
 
@@ -581,10 +603,10 @@ export class ProjectResolver {
 
   public async triggerDataSourceDetection(
     _root: any,
-    _arg: any,
+    arg: { projectId?: number },
     ctx: IContext,
   ) {
-    const project = await ctx.projectService.getCurrentProject();
+    const project = await this.getScopedProject(arg.projectId, ctx);
     const schemaDetector = new DataSourceSchemaDetector({
       ctx,
       projectId: project.id,
@@ -607,11 +629,11 @@ export class ProjectResolver {
 
   public async resolveSchemaChange(
     _root: any,
-    arg: { where: { type: SchemaChangeType } },
+    arg: { where: { type: SchemaChangeType }; projectId?: number },
     ctx: IContext,
   ) {
     const { type } = arg.where;
-    const project = await ctx.projectService.getCurrentProject();
+    const project = await this.getScopedProject(arg.projectId, ctx);
     const schemaDetector = new DataSourceSchemaDetector({
       ctx,
       projectId: project.id,

@@ -347,10 +347,33 @@ export class WrenEngineAdaptor implements IWrenEngineAdaptor {
       await axios.put(url.href, sql, { headers });
     } catch (err: any) {
       logger.debug(`Got error when init database: ${err}`);
+      const responseMessage = err.response?.data?.message || err.response?.data;
+      const connectionMessage =
+        !err.response ||
+        err.code === 'ECONNREFUSED' ||
+        err.message?.includes('ECONNREFUSED')
+          ? `Wren Engine is not reachable at ${this.wrenEngineBaseEndpoint}. Start the Wren Engine service or set WREN_ENGINE_ENDPOINT to the running service before creating a DuckDB sample data product.`
+          : undefined;
+      if (connectionMessage) {
+        throw Errors.create(Errors.GeneralErrorCodes.WREN_ENGINE_ERROR, {
+          customMessage: connectionMessage,
+          originalError: err,
+          other: {
+            dependency: 'Wren Engine',
+            stage: 'duckdb_init_sql',
+            endpoint: this.wrenEngineBaseEndpoint,
+          },
+        });
+      }
       throw Errors.create(Errors.GeneralErrorCodes.INIT_SQL_ERROR, {
         customMessage:
+          responseMessage ||
           Errors.errorMessages[Errors.GeneralErrorCodes.INIT_SQL_ERROR],
         originalError: err,
+        other: {
+          dependency: 'Wren Engine',
+          stage: 'duckdb_init_sql',
+        },
       });
     }
   }

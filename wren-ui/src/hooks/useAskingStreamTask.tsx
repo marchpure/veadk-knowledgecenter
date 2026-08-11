@@ -22,9 +22,12 @@ export default function useAskingStreamTask() {
     setLoading(true);
     reset();
 
-    const eventSource = new EventSource(
-      `/api/ask_task/streaming?queryId=${queryId}`,
+    const params = new URLSearchParams({ queryId });
+    const projectId = new URLSearchParams(window.location.search).get(
+      'projectId',
     );
+    if (projectId) params.set('projectId', projectId);
+    const eventSource = new EventSource(`/api/ask_task/streaming?${params}`);
 
     eventSource.onmessage = (event) => {
       const eventData = JSON.parse(event.data);

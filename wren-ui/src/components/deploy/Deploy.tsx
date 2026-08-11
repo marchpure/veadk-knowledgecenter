@@ -38,7 +38,7 @@ const getDeployStatus = (deploying: boolean, status: SyncStatus) => {
 
 export default function Deploy() {
   const deployContext = useDeployStatusContext();
-  const { data, loading, startPolling, stopPolling } = deployContext;
+  const { data, loading, startPolling, stopPolling, projectId } = deployContext;
 
   const [deployMutation, { data: deployResult, loading: deploying }] =
     useDeployMutation({
@@ -66,7 +66,7 @@ export default function Deploy() {
   const syncStatus = data?.modelSync.status;
 
   const onDeploy = () => {
-    deployMutation();
+    deployMutation({ variables: { projectId } });
     startPolling(1000);
   };
 

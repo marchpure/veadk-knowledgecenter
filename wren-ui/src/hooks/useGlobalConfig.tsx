@@ -9,21 +9,36 @@ type ContextProps = {
 
 const GlobalConfigContext = createContext<ContextProps>({});
 
+const fallbackConfig: UserConfig = {
+  isTelemetryEnabled: false,
+  telemetryKey: '',
+  telemetryHost: '',
+  userUUID: '',
+};
+
 export const GlobalConfigProvider = ({ children }) => {
   const router = useRouter();
   const [config, setConfig] = useState<UserConfig | null>(null);
 
   useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    let disposed = false;
+
     getUserConfig()
       .then((config) => {
+        if (disposed) return;
         setConfig(config);
         // telemetry setup
-        const cleanup = trackUserTelemetry(router, config);
-        return cleanup;
+        cleanup = trackUserTelemetry(router, config);
       })
-      .catch((error) => {
-        console.warn('Failed to get user config', error);
+      .catch(() => {
+        if (!disposed) setConfig(fallbackConfig);
       });
+
+    return () => {
+      disposed = true;
+      cleanup?.();
+    };
   }, [router]);
 
   const value = {

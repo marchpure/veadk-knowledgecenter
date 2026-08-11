@@ -215,6 +215,7 @@ export const typeDefs = gql`
   }
 
   input RelationInput {
+    projectId: Int
     fromModelId: Int!
     fromColumnId: Int!
     toModelId: Int!
@@ -223,6 +224,7 @@ export const typeDefs = gql`
   }
 
   input UpdateRelationInput {
+    projectId: Int
     type: RelationType!
   }
 
@@ -253,6 +255,7 @@ export const typeDefs = gql`
   }
 
   input CreateModelInput {
+    projectId: Int
     sourceTableName: String!
     fields: [String!]!
     primaryKey: String
@@ -1123,16 +1126,16 @@ export const typeDefs = gql`
   # Query and Mutation
   type Query {
     # On Boarding Steps
-    listDataSourceTables: [CompactTable!]!
+    listDataSourceTables(projectId: Int): [CompactTable!]!
     autoGenerateRelation: [RecommendRelations!]!
     onboardingStatus: OnboardingStatusResponse!
 
     # Modeling Page
-    listModels: [ModelInfo!]!
+    listModels(projectId: Int): [ModelInfo!]!
     model(where: ModelWhereInput!): DetailedModel!
-    modelSync: ModelSyncResponse!
-    diagram: Diagram!
-    schemaChange: SchemaChange!
+    modelSync(projectId: Int): ModelSyncResponse!
+    diagram(projectId: Int): Diagram!
+    schemaChange(projectId: Int): SchemaChange!
 
     # View
     listViews: [ViewInfo!]!
@@ -1186,15 +1189,18 @@ export const typeDefs = gql`
     startSampleDataset(data: SampleDatasetInput!): JSON!
     saveTables(data: SaveTablesInput!): JSON!
     saveRelations(data: SaveRelationInput!): JSON!
-    deploy(force: Boolean): JSON!
+    deploy(force: Boolean, projectId: Int): JSON!
 
     # Modeling Page
     createModel(data: CreateModelInput!): JSON!
     updateModel(where: ModelWhereInput!, data: UpdateModelInput!): JSON!
     deleteModel(where: ModelWhereInput!): Boolean!
     previewModelData(where: WhereIdInput!): JSON!
-    triggerDataSourceDetection: Boolean!
-    resolveSchemaChange(where: ResolveSchemaChangeWhereInput!): Boolean!
+    triggerDataSourceDetection(projectId: Int): Boolean!
+    resolveSchemaChange(
+      where: ResolveSchemaChangeWhereInput!
+      projectId: Int
+    ): Boolean!
 
     # Metadata
     updateModelMetadata(

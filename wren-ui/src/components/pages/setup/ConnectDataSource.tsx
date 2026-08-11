@@ -107,9 +107,24 @@ export default function ConnectDataSource(props: Props) {
         <Alert
           message={connectError.shortMessage}
           description={
-            dataSource === DATA_SOURCES.POSTGRES
-              ? getPostgresErrorMessage(connectError)
-              : connectError.message
+            <div>
+              <div>
+                {dataSource === DATA_SOURCES.POSTGRES
+                  ? getPostgresErrorMessage(connectError)
+                  : connectError.message}
+              </div>
+              {(connectError.dependency || connectError.stage) && (
+                <div className="mt-2">
+                  {connectError.dependency && (
+                    <div>Dependency: {connectError.dependency}</div>
+                  )}
+                  {connectError.stage && <div>Stage: {connectError.stage}</div>}
+                </div>
+              )}
+              {connectError.advice && (
+                <div className="mt-2">{connectError.advice}</div>
+              )}
+            </div>
           }
           type="error"
           showIcon

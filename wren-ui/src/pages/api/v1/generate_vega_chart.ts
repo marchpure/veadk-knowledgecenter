@@ -16,6 +16,7 @@ import {
 import { PreviewDataResponse } from '@server/services/queryService';
 import { transformToObjects } from '@server/utils/dataUtils';
 import { enhanceVegaSpec } from '@/utils/vegaSpecUtils';
+import { withApiProjectScope } from '@/server/apiProjectScope';
 
 const { projectService, wrenAIAdaptor, deployService, queryService } =
   components;
@@ -50,10 +51,7 @@ interface GenerateVegaSpecRequest {
   sampleSize?: number;
 }
 
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse,
-) {
+async function handler(req: NextApiRequest, res: NextApiResponse) {
   const {
     question,
     sql,
@@ -198,3 +196,5 @@ export default async function handler(
     });
   }
 }
+
+export default withApiProjectScope(handler);

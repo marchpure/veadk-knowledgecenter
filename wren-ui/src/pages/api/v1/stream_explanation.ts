@@ -1,12 +1,10 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 import { components } from '@/common';
+import { withApiProjectScope } from '@/server/apiProjectScope';
 
 const { wrenAIAdaptor } = components;
 
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse,
-) {
+async function handler(req: NextApiRequest, res: NextApiResponse) {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
@@ -40,3 +38,5 @@ export default async function handler(
     res.status(500).json({ error: error.message });
   }
 }
+
+export default withApiProjectScope(handler);

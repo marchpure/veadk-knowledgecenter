@@ -32,6 +32,7 @@ interface Props {
   [key: string]: any;
   models: DiagramModel[];
   onOpenModelDrawer: () => void;
+  projectId?: number;
 }
 
 const getHasSchemaChange = (schemaChange: SchemaChange) => {
@@ -43,7 +44,8 @@ const getHasSchemaChange = (schemaChange: SchemaChange) => {
 };
 
 export default function ModelTree(props: Props) {
-  const { onOpenModelDrawer, models } = props;
+  const { onOpenModelDrawer, models, projectId } = props;
+  const scopedVariables = projectId ? { projectId } : undefined;
 
   const schemaChangeModal = useModalAction();
   const [triggerDataSourceDetection, { loading: isDetecting }] =
@@ -75,10 +77,14 @@ export default function ModelTree(props: Props) {
           schemaChangeModal.closeModal();
         }
       },
-      refetchQueries: [{ query: DIAGRAM }, { query: LIST_MODELS }],
+      refetchQueries: [
+        { query: DIAGRAM, variables: scopedVariables },
+        { query: LIST_MODELS, variables: scopedVariables },
+      ],
     });
   const { data: schemaChangeData, refetch: refetchSchemaChange } =
     useSchemaChangeQuery({
+      variables: scopedVariables,
       fetchPolicy: 'cache-and-network',
     });
   const hasSchemaChange = useMemo(
@@ -89,7 +95,7 @@ export default function ModelTree(props: Props) {
     schemaChangeModal.openModal();
   };
   const onResolveSchemaChange = (type: SchemaChangeType) => {
-    resolveSchemaChange({ variables: { where: { type } } });
+    resolveSchemaChange({ variables: { where: { type }, ...scopedVariables } });
   };
 
   const getModelGroupNode = createTreeGroupNode({
@@ -107,7 +113,9 @@ export default function ModelTree(props: Props) {
                 ? `Last refresh ${getRelativeTime(schemaChangeData?.schemaChange.lastSchemaChangeTime)}`
                 : ''
             }
-            onClick={() => triggerDataSourceDetection()}
+            onClick={() =>
+              triggerDataSourceDetection({ variables: scopedVariables })
+            }
           />
         ),
       },

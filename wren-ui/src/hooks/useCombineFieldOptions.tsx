@@ -12,6 +12,7 @@ interface Props {
   model?: string;
   // The models to be excluded from model select
   excludeModels?: string[];
+  projectId?: number;
 }
 
 // for identifier keys
@@ -85,7 +86,7 @@ export const convertDefaultValueToIdentifier = (defaultValue) => {
 };
 
 export default function useCombineFieldOptions(props: Props) {
-  const { model, excludeModels } = props;
+  const { model, excludeModels, projectId } = props;
 
   const [baseModel, setBaseModel] = useState<string>(model || '');
 
@@ -93,6 +94,7 @@ export default function useCombineFieldOptions(props: Props) {
   useEffect(() => setBaseModel(model), [model]);
 
   const { data } = useListModelsQuery({
+    variables: projectId ? { projectId } : undefined,
     fetchPolicy: 'cache-and-network',
   });
 

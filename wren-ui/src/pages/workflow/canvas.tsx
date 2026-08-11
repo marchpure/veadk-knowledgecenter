@@ -18,6 +18,7 @@ import {
   Input,
   Layout,
   Modal,
+  Select,
   Space,
   Spin,
   Switch,
@@ -177,6 +178,54 @@ const ReactFlowArea = styled.div`
   flex: 1 1 auto;
   min-width: 0;
   height: 100%;
+  position: relative;
+
+  .react-flow__controls {
+    left: 16px;
+    bottom: 16px;
+    border: 1px solid #dbe4f0;
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.1);
+    overflow: hidden;
+  }
+
+  .react-flow__controls-button {
+    width: 30px;
+    height: 30px;
+    border-bottom: 0;
+    color: #475569;
+    background: rgba(255, 255, 255, 0.94);
+  }
+
+  .react-flow__controls-button:hover {
+    color: #1d4ed8;
+    background: #f8fafc;
+  }
+`;
+
+const ConnectionPanel = styled.div`
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 5;
+  width: 340px;
+  padding: 12px;
+  border: 1px solid #dbe4f0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.12);
+`;
+
+const EdgeSummary = styled.div`
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 5;
+  max-width: 340px;
+  padding: 8px 10px;
+  border: 1px solid #dbe4f0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.94);
 `;
 
 const zeroWidthTriggerDefaultStyle: React.CSSProperties = {
@@ -218,18 +267,112 @@ const groupNodes = (data: DbgptFlowNode[]) => {
   return groups;
 };
 
-const removeIndexFromNodeId = (id: string) => id.replace(/_\d+$/, '');
+type FlowHandleKind = 'input' | 'output' | 'parameter';
+
+const buildHandleId = (nodeId: string, kind: FlowHandleKind, index: number) =>
+  `${nodeId}:${kind}:${index}`;
+
+const parseHandleId = (handleId?: string | null) => {
+  if (!handleId) return null;
+  const colon = handleId.match(/^(.+):(input|output|parameter):(\d+)$/);
+  if (colon) {
+    return {
+      nodeId: colon[1],
+      kind: colon[2] as FlowHandleKind,
+      index: Number(colon[3]),
+    };
+  }
+  const pipe = handleId.match(/^(.+)\|(inputs|outputs|parameters)\|(\d+)$/);
+  if (pipe) {
+    const kindMap = {
+      inputs: 'input',
+      outputs: 'output',
+      parameters: 'parameter',
+    } as const;
+    return {
+      nodeId: pipe[1],
+      kind: kindMap[pipe[2] as keyof typeof kindMap],
+      index: Number(pipe[3]),
+    };
+  }
+  return null;
+};
+
+const normalizeHandleId = (handleId?: string | null) => {
+  const parsed = parseHandleId(handleId);
+  return parsed
+    ? buildHandleId(parsed.nodeId, parsed.kind, parsed.index)
+    : handleId;
+};
+
+const buildConnectionId = (connection: Connection) =>
+  [
+    connection.source,
+    normalizeHandleId(connection.sourceHandle),
+    connection.target,
+    normalizeHandleId(connection.targetHandle),
+  ].join(':');
+
+type PortOption = {
+  value: string;
+  nodeId: string;
+  label: string;
+};
+
+const getOutputOptions = (nodes: Node<DbgptFlowNode>[]): PortOption[] =>
+  nodes.flatMap((node) => {
+    const outputs =
+      node.data.flow_type === 'resource' || !(node.data.outputs || []).length
+        ? [{ label: node.data.label || node.data.name, name: node.data.name }]
+        : node.data.outputs || [];
+    return outputs.map((output, index) => ({
+      value: buildHandleId(node.id, 'output', index),
+      nodeId: node.id,
+      label: `${node.data.label || node.data.name} / ${output.label || output.name || 'Output'}`,
+    }));
+  });
+
+const getInputOptions = (nodes: Node<DbgptFlowNode>[]): PortOption[] =>
+  nodes.flatMap((node) => {
+    const inputs = (node.data.inputs || []).map((input, index) => ({
+      value: buildHandleId(node.id, 'input', index),
+      nodeId: node.id,
+      label: `${node.data.label || node.data.name} / ${input.label || input.name || 'Input'}`,
+    }));
+    const resourceParameters = (node.data.parameters || [])
+      .map((parameter, index) =>
+        parameter.category === 'resource'
+          ? {
+              value: buildHandleId(node.id, 'parameter', index),
+              nodeId: node.id,
+              label: `${node.data.label || node.data.name} / ${parameter.label || parameter.name || 'Resource parameter'}`,
+            }
+          : null,
+      )
+      .filter(Boolean) as PortOption[];
+    return [...inputs, ...resourceParameters];
+  });
 
 const getQueryValue = (value: string | string[] | undefined) =>
   Array.isArray(value) ? value[0] : value;
 
-function StaticNodes({ nodes }: { nodes: DbgptFlowNode[] }) {
+function StaticNodes({
+  nodes,
+  emptyText = 'No nodes found.',
+}: {
+  nodes: DbgptFlowNode[];
+  emptyText?: string;
+}) {
   const onDragStart = (event: DragEvent, node: DbgptFlowNode) => {
     event.dataTransfer.setData('application/reactflow', JSON.stringify(node));
     event.dataTransfer.effectAllowed = 'move';
   };
 
-  if (!nodes.length) return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} />;
+  if (!nodes.length) {
+    return (
+      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={emptyText} />
+    );
+  }
 
   return (
     <div>
@@ -260,33 +403,44 @@ function StaticNodes({ nodes }: { nodes: DbgptFlowNode[] }) {
   );
 }
 
-function AddNodesSider({ error }: { error?: string }) {
+function AddNodesSider({
+  flowLoadError,
+  onNodesLoaded,
+}: {
+  flowLoadError?: string;
+  onNodesLoaded?: (nodes: DbgptFlowNode[]) => void;
+}) {
   const [collapsed, setCollapsed] = useState(false);
   const [searchValue, setSearchValue] = useState('');
   const [operators, setOperators] = useState<DbgptFlowNode[]>([]);
   const [resources, setResources] = useState<DbgptFlowNode[]>([]);
   const [loading, setLoading] = useState(false);
+  const [nodeLoadError, setNodeLoadError] = useState<string | null>(null);
   const [showAllNodes, setShowAllNodes] = useState(false);
 
   const loadNodes = async (tags?: string) => {
     setLoading(true);
+    setNodeLoadError(null);
     try {
       const data = await fetchDbgpt<DbgptFlowNode[]>(
         `/api/v2/serve/awel/nodes${tags ? `?tags=${encodeURIComponent(tags)}` : ''}`,
       );
-      setOperators(
-        (data || []).filter((node) => node.flow_type === 'operator'),
-      );
-      setResources(
-        (data || []).filter((node) => node.flow_type === 'resource'),
-      );
+      const nextNodes = data || [];
+      setOperators(nextNodes.filter((node) => node.flow_type === 'operator'));
+      setResources(nextNodes.filter((node) => node.flow_type === 'resource'));
       window.localStorage.setItem(
         'dbgpt_flow_nodes',
-        JSON.stringify(data || []),
+        JSON.stringify(nextNodes),
       );
-    } catch (_err) {
+      onNodesLoaded?.(nextNodes);
+    } catch (err) {
       setOperators([]);
       setResources([]);
+      setNodeLoadError(
+        err instanceof Error
+          ? err.message
+          : 'Unable to load DB-GPT workflow nodes.',
+      );
     } finally {
       setLoading(false);
     }
@@ -315,6 +469,23 @@ function AddNodesSider({ error }: { error?: string }) {
     list: DbgptFlowNode[],
     groups: ReturnType<typeof groupNodes>,
   ) => {
+    if (nodeLoadError) {
+      return (
+        <Collapse.Panel key="load-error" header="Unavailable">
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description="DB-GPT node service is unavailable."
+          />
+          <Button
+            size="small"
+            block
+            onClick={() => loadNodes(showAllNodes ? undefined : FLOW_NODE_TAGS)}
+          >
+            Retry
+          </Button>
+        </Collapse.Panel>
+      );
+    }
     const visibleGroups = searchValue
       ? groupNodes(
           list.filter((node) =>
@@ -324,6 +495,20 @@ function AddNodesSider({ error }: { error?: string }) {
           ),
         )
       : groups;
+    if (!list.length) {
+      return (
+        <Collapse.Panel key="empty-nodes" header="Empty">
+          <StaticNodes nodes={[]} emptyText="No available nodes." />
+        </Collapse.Panel>
+      );
+    }
+    if (!visibleGroups.length) {
+      return (
+        <Collapse.Panel key="search-empty" header="Search">
+          <StaticNodes nodes={[]} emptyText="No matching nodes." />
+        </Collapse.Panel>
+      );
+    }
     return visibleGroups.map(({ category, categoryLabel, nodes }) => (
       <Collapse.Panel
         key={category}
@@ -383,13 +568,32 @@ function AddNodesSider({ error }: { error?: string }) {
           onChange={(event) => setSearchValue(event.target.value)}
           className="mb-3"
         />
-        {error && (
+        {flowLoadError && (
           <Alert
             className="mb-3"
             type="warning"
             showIcon
-            message="Node service unavailable"
-            description={error}
+            message="Flow load failed"
+            description={flowLoadError}
+          />
+        )}
+        {nodeLoadError && (
+          <Alert
+            className="mb-3"
+            type="error"
+            showIcon
+            message="DB-GPT node service is unavailable"
+            description={nodeLoadError}
+            action={
+              <Button
+                size="small"
+                onClick={() =>
+                  loadNodes(showAllNodes ? undefined : FLOW_NODE_TAGS)
+                }
+              >
+                Retry
+              </Button>
+            }
           />
         )}
         <Spin spinning={loading}>
@@ -430,7 +634,9 @@ function NodePort({
   label: 'inputs' | 'outputs' | 'parameters';
   index: number;
 }) {
-  const handleId = `${node.id}|${label}|${index}`;
+  const kind =
+    label === 'outputs' ? 'output' : label === 'inputs' ? 'input' : 'parameter';
+  const handleId = buildHandleId(node.id, kind, index);
   return (
     <PortRow
       style={{ justifyContent: type === 'source' ? 'flex-end' : 'flex-start' }}
@@ -440,6 +646,7 @@ function NodePort({
           type="target"
           id={handleId}
           position={Position.Left}
+          data-testid={`workflow-handle-${handleId}`}
           style={{ left: -14, width: 9, height: 9 }}
         />
       )}
@@ -456,6 +663,7 @@ function NodePort({
           type="source"
           id={handleId}
           position={Position.Right}
+          data-testid={`workflow-handle-${handleId}`}
           style={{ right: -14, width: 9, height: 9 }}
         />
       )}
@@ -484,7 +692,11 @@ function ParameterValue({
   );
 }
 
-function CanvasNode({ data }: NodeProps<DbgptFlowNode>) {
+type CanvasNodeData = DbgptFlowNode & {
+  onDirty?: () => void;
+};
+
+function CanvasNode({ data }: NodeProps<CanvasNodeData>) {
   const reactFlow = useReactFlow();
   const node = data;
   const inputs = node.inputs || [];
@@ -515,6 +727,7 @@ function CanvasNode({ data }: NodeProps<DbgptFlowNode>) {
         selected: false,
       },
     ]);
+    node.onDirty?.();
   };
 
   const deleteNode = (event: React.MouseEvent) => {
@@ -526,6 +739,7 @@ function CanvasNode({ data }: NodeProps<DbgptFlowNode>) {
         (edge) => edge.source !== node.id && edge.target !== node.id,
       ),
     );
+    node.onDirty?.();
   };
 
   const updateParameter = (name: string, value: unknown) => {
@@ -543,6 +757,7 @@ function CanvasNode({ data }: NodeProps<DbgptFlowNode>) {
         };
       }),
     );
+    node.onDirty?.();
   };
 
   return (
@@ -676,6 +891,7 @@ function ButtonEdge({
   targetPosition,
   style = {},
   markerEnd,
+  data,
 }: EdgeProps) {
   const [edgePath, edgeCenterX, edgeCenterY] = getBezierPath({
     sourceX,
@@ -717,6 +933,7 @@ function ButtonEdge({
             reactFlow.setEdges((edges) =>
               edges.filter((edge) => edge.id !== id),
             );
+            data?.onDirty?.();
           }}
         >
           x
@@ -735,6 +952,16 @@ const checkRequired = (
   const nodes = flowData.nodes || [];
   const edges = flowData.edges || [];
   if (!nodes.length) return [false, undefined, 'Please add nodes first.'];
+  const hasTargetHandle = (
+    nodeId: string,
+    kind: FlowHandleKind,
+    index: number,
+  ) =>
+    edges.some(
+      (edge) =>
+        normalizeHandleId(edge.targetHandle || edge.target_handle) ===
+        buildHandleId(nodeId, kind, index),
+    );
 
   for (const node of nodes) {
     const data = node.data;
@@ -744,9 +971,7 @@ const checkRequired = (
       const input = inputs[index];
       if (
         input.optional === false &&
-        !edges.some(
-          (edge) => edge.targetHandle === `${node.id}|inputs|${index}`,
-        )
+        !hasTargetHandle(node.id, 'input', index)
       ) {
         return [
           false,
@@ -760,9 +985,7 @@ const checkRequired = (
       if (
         parameter.optional === false &&
         parameter.category === 'resource' &&
-        !edges.some(
-          (edge) => edge.targetHandle === `${node.id}|parameters|${index}`,
-        )
+        !hasTargetHandle(node.id, 'parameter', index)
       ) {
         return [
           false,
@@ -803,11 +1026,13 @@ function SaveFlowModal({
 }) {
   const [form] = Form.useForm<DbgptFlowPayload>();
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const isDeployed =
     flowInfo?.state === 'deployed' || flowInfo?.state === 'running';
 
   useEffect(() => {
     if (!open) return;
+    setSaveError(null);
     form.setFieldsValue({
       label: flowInfo?.label,
       name: flowInfo?.name,
@@ -827,6 +1052,7 @@ function SaveFlowModal({
   const submit = async (values: DbgptFlowPayload) => {
     if (!reactFlow) return;
     setSaving(true);
+    setSaveError(null);
     try {
       const flowData = mapReactFlowToFlowData(
         reactFlow.toObject() as DbgptFlowData,
@@ -859,6 +1085,9 @@ function SaveFlowModal({
       onSaved(result);
       onClose();
     } catch (error) {
+      setSaveError(
+        error instanceof Error ? error.message : 'Failed to save flow.',
+      );
       message.error(
         error instanceof Error ? error.message : 'Failed to save flow.',
       );
@@ -877,6 +1106,15 @@ function SaveFlowModal({
       destroyOnClose
     >
       <Form form={form} layout="vertical" onFinish={submit}>
+        {saveError && (
+          <Alert
+            className="mb-4"
+            type="error"
+            showIcon
+            message="Unable to save flow"
+            description={saveError}
+          />
+        )}
         <Form.Item
           label="Title"
           name="label"
@@ -1010,17 +1248,54 @@ function TemplateFlowModal({
 function Canvas() {
   const router = useRouter();
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
+  const suppressDirtyRef = useRef(false);
   const reactFlow = useReactFlow();
-  const [nodes, setNodes, onNodesChange] = useNodesState([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [nodes, setNodes, baseOnNodesChange] = useNodesState([]);
+  const [edges, setEdges, baseOnEdgesChange] = useEdgesState([]);
   const [reactFlowInstance, setReactFlowInstance] =
     useState<ReactFlowInstance>();
   const [flowInfo, setFlowInfo] = useState<DbgptFlow>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
+  const [dirty, setDirty] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
   const [templateOpen, setTemplateOpen] = useState(false);
+  const [panelSourceHandle, setPanelSourceHandle] = useState<string>();
+  const [panelTargetHandle, setPanelTargetHandle] = useState<string>();
   const flowId = getQueryValue(router.query.id);
+  const outputOptions = useMemo(
+    () => getOutputOptions(nodes as Node<DbgptFlowNode>[]),
+    [nodes],
+  );
+  const inputOptions = useMemo(
+    () => getInputOptions(nodes as Node<DbgptFlowNode>[]),
+    [nodes],
+  );
+
+  const markDirty = useCallback(() => {
+    if (!suppressDirtyRef.current) setDirty(true);
+  }, []);
+
+  const attachDirtyHandlers = useCallback(
+    (flowData: DbgptFlowData): DbgptFlowData => ({
+      ...flowData,
+      nodes: (flowData.nodes || []).map((node) => ({
+        ...node,
+        data: {
+          ...node.data,
+          onDirty: markDirty,
+        },
+      })),
+      edges: (flowData.edges || []).map((edge) => ({
+        ...edge,
+        data: {
+          ...(edge as any).data,
+          onDirty: markDirty,
+        },
+      })),
+    }),
+    [markDirty],
+  );
 
   const loadFlow = async (id: string) => {
     setLoading(true);
@@ -1029,10 +1304,17 @@ function Canvas() {
       const data = await fetchDbgpt<DbgptFlow>(
         `/api/v2/serve/awel/flows/${id}`,
       );
-      const flowData = mapFlowDataToReactFlow(data.flow_data);
+      const flowData = attachDirtyHandlers(
+        mapFlowDataToReactFlow(data.flow_data),
+      );
       setFlowInfo(data);
+      suppressDirtyRef.current = true;
       setNodes((flowData.nodes || []) as any);
       setEdges((flowData.edges || []) as any);
+      setDirty(false);
+      window.requestAnimationFrame(() => {
+        suppressDirtyRef.current = false;
+      });
       window.requestAnimationFrame(() => reactFlow.fitView());
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to load flow.');
@@ -1047,12 +1329,29 @@ function Canvas() {
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!dirty) return;
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, []);
+  }, [dirty]);
+
+  const onNodesChange = useCallback(
+    (changes) => {
+      if (changes.some((change) => change.type !== 'select')) markDirty();
+      baseOnNodesChange(changes);
+    },
+    [baseOnNodesChange, markDirty],
+  );
+
+  const onEdgesChange = useCallback(
+    (changes) => {
+      if (changes.some((change) => change.type !== 'select')) markDirty();
+      baseOnEdgesChange(changes);
+    },
+    [baseOnEdgesChange, markDirty],
+  );
 
   const onNodesClick = (_event: unknown, clickedNode: Node<DbgptFlowNode>) => {
     setNodes((currentNodes) =>
@@ -1066,17 +1365,91 @@ function Canvas() {
     );
   };
 
-  const onConnect = (connection: Connection) => {
-    setEdges((currentEdges) =>
-      addEdge(
-        {
-          ...connection,
-          type: 'buttonedge',
-          id: `${connection.source}|${connection.sourceHandle}|${connection.target}|${connection.targetHandle}`,
-        },
-        currentEdges,
-      ),
+  const addWorkflowConnection = useCallback(
+    (connection: Connection) => {
+      if (
+        !connection.source ||
+        !connection.target ||
+        !connection.sourceHandle ||
+        !connection.targetHandle
+      ) {
+        message.warning('Please connect a source output to a target input.');
+        return false;
+      }
+      const sourceHandle = normalizeHandleId(connection.sourceHandle);
+      const targetHandle = normalizeHandleId(connection.targetHandle);
+      const source = parseHandleId(sourceHandle);
+      const target = parseHandleId(targetHandle);
+      if (!source || source.kind !== 'output') {
+        message.warning('The source must be an output handle.');
+        return false;
+      }
+      if (!target || !['input', 'parameter'].includes(target.kind)) {
+        message.warning(
+          'The target must be an input or resource parameter handle.',
+        );
+        return false;
+      }
+      if (connection.source === connection.target) {
+        message.warning('Connect two different nodes.');
+        return false;
+      }
+      const normalizedConnection: Connection = {
+        ...connection,
+        sourceHandle,
+        targetHandle,
+      };
+      const id = buildConnectionId(normalizedConnection);
+      let created = false;
+      setEdges((currentEdges) => {
+        const duplicated = currentEdges.some((edge) => edge.id === id);
+        if (duplicated) return currentEdges;
+        created = true;
+        return addEdge(
+          {
+            ...normalizedConnection,
+            type: 'buttonedge',
+            data: { onDirty: markDirty },
+            id,
+          },
+          currentEdges,
+        );
+      });
+      if (!created) {
+        message.info('This connection already exists.');
+        return false;
+      }
+      markDirty();
+      message.success('Connection added.');
+      return true;
+    },
+    [markDirty, setEdges],
+  );
+
+  const onConnect = useCallback(
+    (connection: Connection) => {
+      addWorkflowConnection(connection);
+    },
+    [addWorkflowConnection],
+  );
+
+  const addConnectionFromPanel = () => {
+    const sourceOption = outputOptions.find(
+      (option) => option.value === panelSourceHandle,
     );
+    const targetOption = inputOptions.find(
+      (option) => option.value === panelTargetHandle,
+    );
+    const added = addWorkflowConnection({
+      source: sourceOption?.nodeId,
+      sourceHandle: panelSourceHandle,
+      target: targetOption?.nodeId,
+      targetHandle: panelTargetHandle,
+    });
+    if (added) {
+      setPanelSourceHandle(undefined);
+      setPanelTargetHandle(undefined);
+    }
   };
 
   const onDrop = useCallback(
@@ -1099,6 +1472,7 @@ function Canvas() {
           ...nodeData,
           id: nodeId,
           selected: true,
+          onDirty: markDirty,
         },
       };
       setNodes((currentNodes) =>
@@ -1110,8 +1484,9 @@ function Canvas() {
           },
         })),
       );
+      markDirty();
     },
-    [reactFlow, setNodes],
+    [markDirty, reactFlow, setNodes],
   );
 
   const onDragOver = useCallback((event: DragEvent) => {
@@ -1166,9 +1541,14 @@ function Canvas() {
       if (!file) return;
       try {
         const data = JSON.parse(await file.text()) as DbgptFlowData;
-        const flowData = mapFlowDataToReactFlow(data);
+        const flowData = attachDirtyHandlers(mapFlowDataToReactFlow(data));
+        suppressDirtyRef.current = true;
         setNodes((flowData.nodes || []) as any);
         setEdges((flowData.edges || []) as any);
+        setDirty(true);
+        window.requestAnimationFrame(() => {
+          suppressDirtyRef.current = false;
+        });
         message.success('Flow imported.');
       } catch (_err) {
         message.error('Invalid flow file.');
@@ -1178,9 +1558,16 @@ function Canvas() {
   };
 
   const importTemplate = (template: DbgptFlow) => {
-    const flowData = mapFlowDataToReactFlow(template.flow_data);
+    const flowData = attachDirtyHandlers(
+      mapFlowDataToReactFlow(template.flow_data),
+    );
+    suppressDirtyRef.current = true;
     setNodes((flowData.nodes || []) as any);
     setEdges((flowData.edges || []) as any);
+    setDirty(true);
+    window.requestAnimationFrame(() => {
+      suppressDirtyRef.current = false;
+    });
     setFlowInfo(
       (current) =>
         ({
@@ -1195,6 +1582,45 @@ function Canvas() {
     window.requestAnimationFrame(() => reactFlow.fitView());
     message.success('Template imported.');
   };
+
+  useEffect(() => {
+    if (
+      process.env.NODE_ENV !== 'test' &&
+      process.env.NEXT_PUBLIC_ENABLE_E2E_HELPERS !== '1'
+    ) {
+      return;
+    }
+    (window as any).__VEADK_WORKFLOW_TEST__ = {
+      addNode: (nodeData: DbgptFlowNode, position = { x: 120, y: 120 }) => {
+        const nodeId = getUniqueFlowNodeId(nodeData, reactFlow.getNodes());
+        const newNode = {
+          id: nodeId,
+          position,
+          type: 'customNode',
+          data: {
+            ...nodeData,
+            id: nodeId,
+            selected: true,
+            onDirty: markDirty,
+          },
+        };
+        setNodes((currentNodes) =>
+          currentNodes.concat(newNode).map((node) => ({
+            ...node,
+            data: {
+              ...node.data,
+              selected: node.id === newNode.id,
+            },
+          })),
+        );
+        markDirty();
+        return nodeId;
+      },
+    };
+    return () => {
+      delete (window as any).__VEADK_WORKFLOW_TEST__;
+    };
+  }, [markDirty, reactFlow, setNodes]);
 
   return (
     <CanvasFrame>
@@ -1236,7 +1662,7 @@ function Canvas() {
       </CanvasHeader>
 
       <CanvasBody>
-        <AddNodesSider error={error} />
+        <AddNodesSider flowLoadError={error} />
         <ReactFlowArea ref={reactFlowWrapper}>
           {error && !flowId ? (
             <Alert
@@ -1249,6 +1675,69 @@ function Canvas() {
           ) : null}
           <Spin spinning={loading}>
             <div style={{ height: 'calc(100vh - 104px)', minHeight: 672 }}>
+              <ConnectionPanel data-testid="workflow-connection-panel">
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <div className="d-flex justify-space-between align-center">
+                    <Text strong>Connections</Text>
+                    <Badge count={edges.length} showZero />
+                  </div>
+                  <Select
+                    data-testid="workflow-source-select"
+                    allowClear
+                    showSearch
+                    size="small"
+                    value={panelSourceHandle}
+                    placeholder="Source output"
+                    style={{ width: '100%' }}
+                    options={outputOptions.map((option) => ({
+                      label: option.label,
+                      value: option.value,
+                    }))}
+                    onChange={setPanelSourceHandle}
+                  />
+                  <Select
+                    data-testid="workflow-target-select"
+                    allowClear
+                    showSearch
+                    size="small"
+                    value={panelTargetHandle}
+                    placeholder="Target input"
+                    style={{ width: '100%' }}
+                    options={inputOptions.map((option) => ({
+                      label: option.label,
+                      value: option.value,
+                    }))}
+                    onChange={setPanelTargetHandle}
+                  />
+                  <Button
+                    size="small"
+                    type="primary"
+                    block
+                    disabled={!panelSourceHandle || !panelTargetHandle}
+                    onClick={addConnectionFromPanel}
+                  >
+                    Add connection
+                  </Button>
+                </Space>
+              </ConnectionPanel>
+              <EdgeSummary data-testid="workflow-edge-summary">
+                <Text className="gray-7 text-sm">
+                  {edges.length} connection{edges.length === 1 ? '' : 's'}
+                </Text>
+                {edges.length > 0 && (
+                  <div className="mt-1">
+                    {edges.slice(0, 3).map((edge) => (
+                      <Text
+                        key={edge.id}
+                        className="gray-7 text-xs d-block"
+                        ellipsis
+                      >
+                        {`${edge.source} -> ${edge.target}`}
+                      </Text>
+                    ))}
+                  </div>
+                )}
+              </EdgeSummary>
               <ReactFlow
                 nodes={nodes}
                 edges={edges}
@@ -1265,7 +1754,7 @@ function Canvas() {
                 fitView
                 deleteKeyCode={['Backspace', 'Delete']}
               >
-                <Controls position="bottom-center" />
+                <Controls position="bottom-left" showInteractive={false} />
                 <Background color="#94a3b8" gap={16} />
               </ReactFlow>
             </div>
@@ -1280,6 +1769,7 @@ function Canvas() {
         onClose={() => setSaveOpen(false)}
         onSaved={(flow) => {
           setFlowInfo(flow);
+          setDirty(false);
           if (!flowId && flow.uid) {
             router.replace(
               `${Path.Workflow}/canvas?id=${encodeURIComponent(flow.uid)}`,

@@ -103,8 +103,7 @@ export class AskingResolver {
     this.updateThread = this.updateThread.bind(this);
     this.deleteThread = this.deleteThread.bind(this);
     this.listThreads = this.listThreads.bind(this);
-    this.createThreadResponseShare =
-      this.createThreadResponseShare.bind(this);
+    this.createThreadResponseShare = this.createThreadResponseShare.bind(this);
     this.getSharedThreadResponse = this.getSharedThreadResponse.bind(this);
     this.createThreadResponse = this.createThreadResponse.bind(this);
     this.updateThreadResponse = this.updateThreadResponse.bind(this);

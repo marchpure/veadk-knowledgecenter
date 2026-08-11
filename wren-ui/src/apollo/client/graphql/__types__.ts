@@ -208,6 +208,7 @@ export type CreateInstructionInput = {
 export type CreateModelInput = {
   fields: Array<Scalars['String']>;
   primaryKey?: InputMaybe<Scalars['String']>;
+  projectId?: InputMaybe<Scalars['Int']>;
   sourceTableName: Scalars['String'];
 };
 
@@ -869,6 +870,7 @@ export type MutationDeleteViewArgs = {
 
 export type MutationDeployArgs = {
   force?: InputMaybe<Scalars['Boolean']>;
+  projectId?: InputMaybe<Scalars['Int']>;
 };
 
 
@@ -943,6 +945,7 @@ export type MutationRerunAskingTaskArgs = {
 
 
 export type MutationResolveSchemaChangeArgs = {
+  projectId?: InputMaybe<Scalars['Int']>;
   where: ResolveSchemaChangeWhereInput;
 };
 
@@ -974,6 +977,11 @@ export type MutationSetDashboardScheduleArgs = {
 
 export type MutationStartSampleDatasetArgs = {
   data: SampleDatasetInput;
+};
+
+
+export type MutationTriggerDataSourceDetectionArgs = {
+  projectId?: InputMaybe<Scalars['Int']>;
 };
 
 
@@ -1195,6 +1203,11 @@ export type QueryAskingTaskArgs = {
 };
 
 
+export type QueryDiagramArgs = {
+  projectId?: InputMaybe<Scalars['Int']>;
+};
+
+
 export type QueryGetMdlArgs = {
   hash: Scalars['String'];
 };
@@ -1210,13 +1223,33 @@ export type QueryInstantRecommendedQuestionsArgs = {
 };
 
 
+export type QueryListDataSourceTablesArgs = {
+  projectId?: InputMaybe<Scalars['Int']>;
+};
+
+
+export type QueryListModelsArgs = {
+  projectId?: InputMaybe<Scalars['Int']>;
+};
+
+
 export type QueryModelArgs = {
   where: ModelWhereInput;
 };
 
 
+export type QueryModelSyncArgs = {
+  projectId?: InputMaybe<Scalars['Int']>;
+};
+
+
 export type QueryNativeSqlArgs = {
   responseId: Scalars['Int'];
+};
+
+
+export type QuerySchemaChangeArgs = {
+  projectId?: InputMaybe<Scalars['Int']>;
 };
 
 
@@ -1283,6 +1316,7 @@ export type Relation = {
 export type RelationInput = {
   fromColumnId: Scalars['Int'];
   fromModelId: Scalars['Int'];
+  projectId?: InputMaybe<Scalars['Int']>;
   toColumnId: Scalars['Int'];
   toModelId: Scalars['Int'];
   type: RelationType;
@@ -1588,6 +1622,7 @@ export type UpdateNestedColumnMetadataInput = {
 };
 
 export type UpdateRelationInput = {
+  projectId?: InputMaybe<Scalars['Int']>;
   type: RelationType;
 };
 

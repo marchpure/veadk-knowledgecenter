@@ -6,6 +6,7 @@ import { Path } from '@/utils/enum';
 import SiderLayout from '@/components/layouts/SiderLayout';
 import Prompt from '@/components/pages/home/prompt';
 import DemoPrompt from '@/components/pages/home/prompt/DemoPrompt';
+import HomeProjectReturn from '@/components/pages/home/HomeProjectReturn';
 import useHomeSidebar from '@/hooks/useHomeSidebar';
 import useAskPrompt from '@/hooks/useAskPrompt';
 import useRecommendedQuestionsInstruction from '@/hooks/useRecommendedQuestionsInstruction';
@@ -19,6 +20,9 @@ import { useGetSettingsQuery } from '@/apollo/client/graphql/settings.generated'
 import { CreateThreadInput } from '@/apollo/client/graphql/__types__';
 
 const { Text } = Typography;
+
+const getQueryValue = (value: string | string[] | undefined) =>
+  Array.isArray(value) ? value[0] : value;
 
 const Wrapper = ({ children }) => {
   return (
@@ -90,6 +94,7 @@ function RecommendedQuestionsInstruction(props) {
 export default function Home() {
   const $prompt = useRef<ComponentRef<typeof Prompt>>(null);
   const router = useRouter();
+  const projectId = getQueryValue(router.query.projectId);
   const homeSidebar = useHomeSidebar();
   const askPrompt = useAskPrompt();
 
@@ -126,14 +131,24 @@ export default function Home() {
       const response = await createThread({ variables: { data: payload } });
       const threadId = response.data.createThread.id;
       await preloadThread({ variables: { threadId } });
-      router.push(Path.Home + `/${threadId}`);
+      router.push({
+        pathname: `${Path.Home}/${threadId}`,
+        query: router.query.projectId
+          ? { projectId: router.query.projectId }
+          : {},
+      });
     } catch (error) {
       console.error(error);
     }
   };
 
   return (
-    <SiderLayout loading={false} sidebar={homeSidebar}>
+    <SiderLayout
+      loading={false}
+      sidebar={homeSidebar}
+      sidebarTop={<HomeProjectReturn />}
+      hideSidebarAuxiliaryActions={Boolean(projectId)}
+    >
       {isSampleDataset && (
         <SampleQuestionsInstruction
           sampleQuestions={sampleQuestions}

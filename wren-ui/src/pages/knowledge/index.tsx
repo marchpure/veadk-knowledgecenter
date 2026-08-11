@@ -19,7 +19,6 @@ import PartitionOutlined from '@ant-design/icons/PartitionOutlined';
 import PlusOutlined from '@ant-design/icons/PlusOutlined';
 import ReadOutlined from '@ant-design/icons/ReadOutlined';
 import SearchOutlined from '@ant-design/icons/SearchOutlined';
-import ShareAltOutlined from '@ant-design/icons/ShareAltOutlined';
 import ClockCircleOutlined from '@ant-design/icons/ClockCircleOutlined';
 import RightOutlined from '@ant-design/icons/RightOutlined';
 import {
@@ -45,12 +44,6 @@ type SpaceFormValues = {
   vector_type: string;
   domain_type: string;
   index_methods?: string[];
-};
-
-const indexMethodLabels: Record<string, string> = {
-  VectorStore: 'Vector store',
-  FullText: 'Full text',
-  KnowledgeGraph: 'Knowledge graph',
 };
 
 const formatDate = (value?: string) => {
@@ -243,31 +236,24 @@ export default function Knowledge() {
                       </Tag>
                     </>
                   }
-                  description={space.desc || 'No description.'}
-                  footer={
-                    <>
+                  description={
+                    <Space direction="vertical" size={8}>
+                      <Text className="gray-7">
+                        {space.desc || 'No description.'}
+                      </Text>
                       <Space size={[6, 6]} wrap>
-                        {(space.index_methods || [])
-                          .slice(0, 2)
-                          .map((method) => (
-                            <Tag color="purple" key={method}>
-                              {indexMethodLabels[method] || method}
-                            </Tag>
-                          ))}
-                        {spaceStats.graph_vertex_count != null && (
-                          <Tag icon={<NodeIndexOutlined />} color="geekblue">
-                            {spaceStats.graph_vertex_count}
-                          </Tag>
-                        )}
-                        {spaceStats.graph_edge_count != null && (
-                          <Tag icon={<ShareAltOutlined />} color="geekblue">
-                            {spaceStats.graph_edge_count}
-                          </Tag>
-                        )}
                         <Tag icon={<ClockCircleOutlined />}>
                           {formatDate(space.gmt_modified)}
                         </Tag>
                       </Space>
+                    </Space>
+                  }
+                  footer={
+                    <>
+                      <Text className="gray-7 text-sm">
+                        Details include documents, chunks, recall, and index
+                        configuration.
+                      </Text>
                       <Button
                         size="small"
                         type="link"

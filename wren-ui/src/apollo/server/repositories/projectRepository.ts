@@ -9,6 +9,7 @@ import {
   isEmpty,
 } from 'lodash';
 import { DataSourceName } from '@server/types';
+import { getRequestProjectId } from '@/server/requestProjectContext';
 import {
   IbisRedshiftConnectionType,
   IbisDatabricksConnectionType,
@@ -197,6 +198,15 @@ export class ProjectRepository
   }
 
   public async getCurrentProject() {
+    const requestProjectId = getRequestProjectId();
+    if (requestProjectId) {
+      const project = await this.findOneBy({ id: requestProjectId });
+      if (!project) {
+        throw new Error(`Project ${requestProjectId} not found`);
+      }
+      return project;
+    }
+
     const projects = await this.findAll({
       order: 'id',
       limit: 1,

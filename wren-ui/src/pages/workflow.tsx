@@ -48,9 +48,7 @@ type CopyFlowFormValues = {
 };
 
 const getFlowEditorPath = (flow: DbgptFlow) => {
-  if (flow.define_type === 'python') {
-    return `${Path.Workflow}/libro?id=${encodeURIComponent(flow.uid)}`;
-  }
+  if (flow.define_type === 'python') return null;
   return `${Path.Workflow}/canvas?id=${encodeURIComponent(flow.uid)}`;
 };
 
@@ -124,7 +122,9 @@ export default function Workflow() {
       message.success('Flow deleted.');
       await loadFlows(page);
     } catch (err) {
-      message.error(err instanceof Error ? err.message : 'Unable to delete flow.');
+      message.error(
+        err instanceof Error ? err.message : 'Unable to delete flow.',
+      );
     } finally {
       setActionLoading('');
     }
@@ -163,7 +163,9 @@ export default function Workflow() {
       setCopySource(null);
       await loadFlows(1);
     } catch (err) {
-      message.error(err instanceof Error ? err.message : 'Unable to copy flow.');
+      message.error(
+        err instanceof Error ? err.message : 'Unable to copy flow.',
+      );
     } finally {
       setActionLoading('');
     }
@@ -242,57 +244,78 @@ export default function Workflow() {
         ) : (
           <>
             <ConstructGrid>
-              {flows.map((flow) => (
-                <ConstructCard
-                  key={flow.uid}
-                  icon={<ForkOutlined />}
-                  title={flow.label || flow.name}
-                  onClick={() => router.push(getFlowEditorPath(flow))}
-                  tags={
-                    <>
-                      {flow.source && (
-                        <Tag color={flow.source === 'DBGPT-WEB' ? 'green' : 'blue'}>
-                          {flow.source}
-                        </Tag>
-                      )}
-                      {flow.define_type && <Tag color="purple">{flow.define_type}</Tag>}
-                      <Tag>{flow.editable ? 'Editable' : 'Read only'}</Tag>
-                      <StatusTag status={flow.state} />
-                    </>
-                  }
-                  description={flow.description || 'No description.'}
-                  footer={
-                    <>
-                      <span>
-                        {flow.nick_name || 'owner unset'}
-                        {flow.gmt_modified ? ` · ${flow.gmt_modified}` : ''}
-                      </span>
-                      <span>
-                        <Button
-                          size="small"
-                          type="primary"
-                          icon={<MessageOutlined />}
-                          loading={actionLoading === `chat:${flow.uid}`}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            startFlowChat(flow);
-                          }}
-                        >
-                          Chat
-                        </Button>
-                        <Dropdown overlay={renderFlowMenu(flow)} trigger={['click']}>
+              {flows.map((flow) => {
+                const editorPath = getFlowEditorPath(flow);
+                return (
+                  <ConstructCard
+                    key={flow.uid}
+                    icon={<ForkOutlined />}
+                    title={flow.label || flow.name}
+                    onClick={
+                      editorPath ? () => router.push(editorPath) : undefined
+                    }
+                    tags={
+                      <>
+                        {flow.source && (
+                          <Tag
+                            color={
+                              flow.source === 'DBGPT-WEB' ? 'green' : 'blue'
+                            }
+                          >
+                            {flow.source}
+                          </Tag>
+                        )}
+                        {flow.define_type && (
+                          <Tag color="purple">{flow.define_type}</Tag>
+                        )}
+                        <Tag>{flow.editable ? 'Editable' : 'Read only'}</Tag>
+                        {!editorPath && (
+                          <Tag color="orange">Editor unsupported</Tag>
+                        )}
+                        <StatusTag status={flow.state} />
+                      </>
+                    }
+                    description={
+                      !editorPath
+                        ? 'Python flows are listed for operation, but this build does not include the DB-GPT Libro editor. Canvas editing is disabled to avoid a 404.'
+                        : flow.description || 'No description.'
+                    }
+                    footer={
+                      <>
+                        <span>
+                          {flow.nick_name || 'owner unset'}
+                          {flow.gmt_modified ? ` · ${flow.gmt_modified}` : ''}
+                        </span>
+                        <span>
                           <Button
                             size="small"
-                            className="ml-2"
-                            icon={<EllipsisOutlined />}
-                            onClick={(event) => event.stopPropagation()}
-                          />
-                        </Dropdown>
-                      </span>
-                    </>
-                  }
-                />
-              ))}
+                            type="primary"
+                            icon={<MessageOutlined />}
+                            loading={actionLoading === `chat:${flow.uid}`}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              startFlowChat(flow);
+                            }}
+                          >
+                            Chat
+                          </Button>
+                          <Dropdown
+                            overlay={renderFlowMenu(flow)}
+                            trigger={['click']}
+                          >
+                            <Button
+                              size="small"
+                              className="ml-2"
+                              icon={<EllipsisOutlined />}
+                              onClick={(event) => event.stopPropagation()}
+                            />
+                          </Dropdown>
+                        </span>
+                      </>
+                    }
+                  />
+                );
+              })}
             </ConstructGrid>
             <div className="d-flex justify-end mt-4">
               <Pagination
@@ -318,7 +341,9 @@ export default function Workflow() {
         visible={copyOpen}
         title="Copy AWEL flow"
         destroyOnClose
-        confirmLoading={copySource ? actionLoading === `copy:${copySource.uid}` : false}
+        confirmLoading={
+          copySource ? actionLoading === `copy:${copySource.uid}` : false
+        }
         onCancel={() => {
           setCopyOpen(false);
           setCopySource(null);
@@ -333,7 +358,8 @@ export default function Workflow() {
               { required: true, message: 'Enter a flow name.' },
               {
                 pattern: /^[a-zA-Z0-9_-]+$/,
-                message: 'Can only contain numbers, letters, underscores, and dashes.',
+                message:
+                  'Can only contain numbers, letters, underscores, and dashes.',
               },
             ]}
           >
@@ -349,7 +375,11 @@ export default function Workflow() {
           <Form.Item label="Editable" name="editable" valuePropName="checked">
             <Switch />
           </Form.Item>
-          <Form.Item label="Deploy after copy" name="deploy" valuePropName="checked">
+          <Form.Item
+            label="Deploy after copy"
+            name="deploy"
+            valuePropName="checked"
+          >
             <Switch />
           </Form.Item>
         </Form>

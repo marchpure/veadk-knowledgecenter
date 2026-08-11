@@ -369,7 +369,7 @@ export class ModelService implements IModelService {
       const relationName = this.generateRelationName(relation, models, columns);
       return {
         projectId: id,
-        name: relationName,
+        name: `Project${id}${relationName}`,
         fromColumnId: relation.fromColumnId,
         toColumnId: relation.toColumnId,
         joinType: relation.type,
@@ -386,7 +386,9 @@ export class ModelService implements IModelService {
   }
 
   public async createRelation(relation: RelationData): Promise<Relation> {
-    const { id } = await this.projectService.getCurrentProject();
+    const { id } = relation.projectId
+      ? await this.projectService.getProjectById(relation.projectId)
+      : await this.projectService.getCurrentProject();
     const modelIds = [relation.fromModelId, relation.toModelId];
     const models = await this.modelRepository.findAllByIds(modelIds);
     const columnIds = [relation.fromColumnId, relation.toColumnId];
@@ -404,7 +406,7 @@ export class ModelService implements IModelService {
     const relationName = this.generateRelationName(relation, models, columns);
     const savedRelation = await this.relationRepository.createOne({
       projectId: id,
-      name: relationName,
+      name: `Project${id}${relationName}`,
       fromColumnId: relation.fromColumnId,
       toColumnId: relation.toColumnId,
       joinType: relation.type,

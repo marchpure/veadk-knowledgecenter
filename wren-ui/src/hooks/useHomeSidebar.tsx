@@ -29,7 +29,21 @@ export default function useHomeSidebar() {
   );
 
   const onSelect = (selectKeys: string[]) => {
-    router.push(`${Path.Home}/${selectKeys[0]}`);
+    router.push({
+      pathname: `${Path.Home}/${selectKeys[0]}`,
+      query: router.query.projectId
+        ? { projectId: router.query.projectId }
+        : {},
+    });
+  };
+
+  const onNewThread = () => {
+    router.push({
+      pathname: Path.Home,
+      query: router.query.projectId
+        ? { projectId: router.query.projectId }
+        : {},
+    });
   };
 
   const onRename = async (id: string, newName: string) => {
@@ -46,7 +60,9 @@ export default function useHomeSidebar() {
 
   return {
     data: { threads },
+    compactTopNav: Boolean(router.query.projectId),
     onSelect,
+    onNewThread,
     onRename,
     onDelete,
     refetch,

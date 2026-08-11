@@ -24,18 +24,26 @@ const StyledSider = styled(Sider)`
 
 type Props = React.ComponentProps<typeof SimpleLayout> & {
   sidebar?: React.ComponentProps<typeof Sidebar>;
+  sidebarTop?: React.ReactNode;
   color?: string;
+  hideSidebarAuxiliaryActions?: boolean;
 };
 
 export default function SiderLayout(props: Props) {
-  const { sidebar, loading, color } = props;
+  const { sidebar, sidebarTop, loading, color, hideSidebarAuxiliaryActions } =
+    props;
   const settings = useModalAction();
 
   return (
     <SimpleLayout loading={loading}>
       <Layout className="adm-layout">
         <StyledSider width={280}>
-          <Sidebar {...sidebar} onOpenSettings={settings.openModal} />
+          <Sidebar
+            {...sidebar}
+            topSlot={sidebarTop}
+            hideAuxiliaryActions={hideSidebarAuxiliaryActions}
+            onOpenSettings={settings.openModal}
+          />
         </StyledSider>
         <StyledContentLayout color={color}>
           {props.children}

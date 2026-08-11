@@ -24,6 +24,7 @@ const FormFieldKey = {
 
 type Props = Pick<DrawerAction, 'defaultValue' | 'formMode'> & {
   form: FormInstance;
+  projectId?: number;
 };
 
 const primaryKeyValidator =
@@ -38,7 +39,8 @@ const primaryKeyValidator =
   };
 
 export default function ModelForm(props: Props) {
-  const { defaultValue, form, formMode } = props;
+  const { defaultValue, form, formMode, projectId } = props;
+  const scopedVariables = projectId ? { projectId } : undefined;
 
   const [selectedColumns, setSelectedColumns] = useState<string[]>([]);
   const [sourceTableName, setSourceTableName] = useState<string>(undefined);
@@ -48,11 +50,13 @@ export default function ModelForm(props: Props) {
 
   const { data: listModelsQueryResult, loading: listModelsQueryLoading } =
     useListModelsQuery({
+      variables: scopedVariables,
       fetchPolicy: 'cache-and-network',
       skip: isUpdateMode,
     });
 
   const { data, loading: fetching } = useListDataSourceTablesQuery({
+    variables: scopedVariables,
     fetchPolicy: 'cache-and-network',
     onError: (error) => console.error(error),
   });

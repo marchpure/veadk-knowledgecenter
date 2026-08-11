@@ -16,8 +16,10 @@ export interface Props {
     threads: ThreadData[];
   };
   onSelect: (selectKeys) => void;
+  onNewThread?: () => void;
   onDelete: (id: string) => Promise<void>;
   onRename: (id: string, newName: string) => Promise<void>;
+  compactTopNav?: boolean;
 }
 
 export const StyledSidebarTree = styled(SidebarTree)`
@@ -39,10 +41,13 @@ export const StyledSidebarTree = styled(SidebarTree)`
 `;
 
 export default function Home(props: Props) {
-  const { data, onSelect, onRename, onDelete } = props;
+  const { data, onSelect, onNewThread, onRename, onDelete, compactTopNav } =
+    props;
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const { threads } = data;
+  const projectId = router.query.projectId;
+  const scopedQuery = projectId ? { projectId } : {};
 
   const { treeSelectedKeys, setTreeSelectedKeys } = useSidebarTreeState();
 
@@ -54,7 +59,7 @@ export default function Home(props: Props) {
     try {
       await onDelete(threadId);
       if (params?.id == threadId) {
-        router.push(Path.Home);
+        router.push({ pathname: Path.Home, query: scopedQuery });
       }
     } catch (error) {
       console.error(error);
@@ -75,7 +80,8 @@ export default function Home(props: Props) {
         className={clsx({
           'adm-treeNode--selected': router.pathname === Path.HomeDashboard,
         })}
-        href={Path.HomeDashboard}
+        style={compactTopNav ? { marginTop: 0 } : undefined}
+        href={{ pathname: Path.HomeDashboard, query: scopedQuery }}
       >
         <FundViewOutlined className="mr-2" />
         <span className="text-medium">Dashboard</span>
@@ -84,6 +90,7 @@ export default function Home(props: Props) {
         threads={threads}
         selectedKeys={treeSelectedKeys}
         onSelect={onTreeSelect}
+        onNewThread={onNewThread}
         onRename={onRename}
         onDeleteThread={onDeleteThread}
       />

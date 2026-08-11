@@ -22,6 +22,7 @@ import {
   WrenAIError,
 } from '@/apollo/server/models/adaptor';
 import { getLogger } from '@server/utils';
+import { withApiProjectScope } from '@/server/apiProjectScope';
 
 const logger = getLogger('API_ASK');
 logger.level = 'debug';
@@ -41,10 +42,7 @@ interface AskRequest {
   threadId?: string;
 }
 
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse,
-) {
+async function handler(req: NextApiRequest, res: NextApiResponse) {
   const { question, sampleSize, language, threadId } = req.body as AskRequest;
   const startTime = Date.now();
   let project;
@@ -319,3 +317,5 @@ export default async function handler(
     });
   }
 }
+
+export default withApiProjectScope(handler);

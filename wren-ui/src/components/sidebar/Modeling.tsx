@@ -19,12 +19,13 @@ export const StyledSidebarTree = styled(SidebarTree)`
 
 export interface Props {
   data: Diagram;
+  projectId?: number;
   onOpenModelDrawer: () => void;
   onSelect: (selectKeys) => void;
 }
 
 export default function Modeling(props: Props) {
-  const { data, onSelect, onOpenModelDrawer } = props;
+  const { data, onSelect, onOpenModelDrawer, projectId } = props;
   const { models = [], views = [] } = data || {};
 
   return (
@@ -34,6 +35,7 @@ export default function Modeling(props: Props) {
         onSelect={onSelect}
         selectedKeys={[]}
         onOpenModelDrawer={onOpenModelDrawer}
+        projectId={projectId}
       />
       <ViewTree views={views} onSelect={onSelect} selectedKeys={[]} />
     </>

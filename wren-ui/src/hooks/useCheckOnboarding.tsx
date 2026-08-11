@@ -11,20 +11,46 @@ const redirectRoute = {
   [OnboardingStatus.WITH_SAMPLE_DATASET]: Path.Modeling,
 };
 
-export const useWithOnboarding = (options: { enabled?: boolean } = {}) => {
+export const useWithOnboarding = (
+  options: { enabled?: boolean; autoRedirect?: boolean } = {},
+) => {
   const enabled = options.enabled ?? true;
+  const autoRedirect = options.autoRedirect ?? true;
   const router = useRouter();
-  const { data, loading } = useOnboardingStatusQuery({
+  const { data, loading, error, refetch } = useOnboardingStatusQuery({
     skip: !enabled,
+    errorPolicy: 'all',
   });
 
   const onboardingStatus = data?.onboardingStatus?.status;
 
   useEffect(() => {
     if (!enabled) return;
+    if (!autoRedirect) return;
     if (onboardingStatus) {
       const newPath = redirectRoute[onboardingStatus];
       const pathname = router.pathname;
+      const projectScopedPaths = new Set([
+        Path.Modeling,
+        Path.KnowledgeQuestionSQLPairs,
+        Path.KnowledgeInstructions,
+      ]);
+      const rawProjectId = Array.isArray(router.query.projectId)
+        ? router.query.projectId[0]
+        : router.query.projectId;
+      const projectId = Number(rawProjectId);
+      const isProjectScopedPage =
+        projectScopedPaths.has(pathname as Path) &&
+        Number.isFinite(projectId) &&
+        projectId > 0;
+
+      // A project-scoped construct page is already past the global onboarding
+      // flow. Its project id is carried by the Apollo request context, so the
+      // onboarding status of the default project must not redirect it to the
+      // legacy setup wizard.
+      if (isProjectScopedPage) {
+        return;
+      }
 
       // redirect to new path if onboarding is not completed
       if (newPath && newPath !== Path.Modeling) {
@@ -72,10 +98,18 @@ export const useWithOnboarding = (options: { enabled?: boolean } = {}) => {
         return;
       }
     }
-  }, [enabled, onboardingStatus, router.pathname]);
+  }, [
+    autoRedirect,
+    enabled,
+    onboardingStatus,
+    router.pathname,
+    router.query.projectId,
+  ]);
 
   return {
     loading: enabled ? loading : false,
+    error,
+    refetch,
     onboardingStatus,
   };
 };

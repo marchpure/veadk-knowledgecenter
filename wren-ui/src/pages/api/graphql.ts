@@ -14,12 +14,21 @@ import {
 } from '@/apollo/server/utils/error';
 import { TelemetryEvent } from '@/apollo/server/telemetry/telemetry';
 import { components } from '@/common';
+import { runWithRequestProjectId } from '@/server/requestProjectContext';
 
 const serverConfig = getConfig();
 const logger = getLogger('APOLLO');
 logger.level = 'debug';
 
 const cors = microCors();
+
+const getRequestProjectId = (req: NextApiRequest) => {
+  const rawProjectId = req.headers['x-veadk-project-id'];
+  const projectId = Number(
+    Array.isArray(rawProjectId) ? rawProjectId[0] : rawProjectId,
+  );
+  return Number.isFinite(projectId) && projectId > 0 ? projectId : undefined;
+};
 
 export const config: PageConfig = {
   api: {
@@ -126,45 +135,50 @@ const bootstrapServer = async () => {
       return defaultApolloErrorHandler(error);
     },
     introspection: process.env.NODE_ENV !== 'production',
-    context: (): IContext => ({
-      config: serverConfig,
-      telemetry,
-      // adaptor
-      wrenEngineAdaptor,
-      ibisServerAdaptor: ibisAdaptor,
-      wrenAIAdaptor,
-      // services
-      projectService,
-      modelService,
-      mdlService,
-      deployService,
-      askingService,
-      queryService,
-      dashboardService,
-      sqlPairService,
-      instructionService,
-      // repository
-      projectRepository,
-      modelRepository,
-      modelColumnRepository,
-      modelNestedColumnRepository,
-      relationRepository,
-      viewRepository,
-      deployRepository: deployLogRepository,
-      schemaChangeRepository,
-      learningRepository,
-      dashboardRepository,
-      dashboardItemRepository,
-      sqlPairRepository,
-      instructionRepository,
-      apiHistoryRepository,
-      dashboardItemRefreshJobRepository,
-      threadResponseShareRepository,
-      // background trackers
-      projectRecommendQuestionBackgroundTracker,
-      threadRecommendQuestionBackgroundTracker,
-      dashboardCacheBackgroundTracker,
-    }),
+    context: ({ req }): IContext => {
+      const requestProjectId = getRequestProjectId(req);
+      return {
+        config: serverConfig,
+        request: req,
+        requestProjectId,
+        telemetry,
+        // adaptor
+        wrenEngineAdaptor,
+        ibisServerAdaptor: ibisAdaptor,
+        wrenAIAdaptor,
+        // services
+        projectService,
+        modelService,
+        mdlService,
+        deployService,
+        askingService,
+        queryService,
+        dashboardService,
+        sqlPairService,
+        instructionService,
+        // repository
+        projectRepository,
+        modelRepository,
+        modelColumnRepository,
+        modelNestedColumnRepository,
+        relationRepository,
+        viewRepository,
+        deployRepository: deployLogRepository,
+        schemaChangeRepository,
+        learningRepository,
+        dashboardRepository,
+        dashboardItemRepository,
+        sqlPairRepository,
+        instructionRepository,
+        apiHistoryRepository,
+        dashboardItemRefreshJobRepository,
+        threadResponseShareRepository,
+        // background trackers
+        projectRecommendQuestionBackgroundTracker,
+        threadRecommendQuestionBackgroundTracker,
+        dashboardCacheBackgroundTracker,
+      };
+    },
   });
   await apolloServer.start();
   return apolloServer;
@@ -174,9 +188,11 @@ const startServer = bootstrapServer();
 
 const handler = async (req: NextApiRequest, res: NextApiResponse) => {
   const apolloServer = await startServer;
-  await apolloServer.createHandler({
-    path: '/api/graphql',
-  })(req, res);
+  await runWithRequestProjectId(getRequestProjectId(req), () =>
+    apolloServer.createHandler({
+      path: '/api/graphql',
+    })(req, res),
+  );
 };
 
 export default cors((req: NextApiRequest, res: NextApiResponse) =>

@@ -15,11 +15,18 @@ export default async function handler(
     const result = await createApplicationResultShare(req.body?.apiHistoryId);
     res.status(200).json(result);
   } catch (error) {
-    res.status(error instanceof ApiError ? error.statusCode : 500).json({
+    const payload: Record<string, unknown> = {
       error:
         error instanceof Error
           ? error.message
           : 'Unable to create application result share.',
-    });
+    };
+    if (error instanceof ApiError) {
+      if (error.code) payload.code = error.code;
+      if (error.additionalData) Object.assign(payload, error.additionalData);
+    }
+    res
+      .status(error instanceof ApiError ? error.statusCode : 500)
+      .json(payload);
   }
 }

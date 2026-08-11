@@ -45,14 +45,23 @@ const navItems = [
   { key: 'tools', label: 'Tools', path: Path.Tools },
 ];
 
-const getActiveKey = (pathname: string) => {
+const getQueryValue = (value: string | string[] | undefined) =>
+  Array.isArray(value) ? value[0] : value;
+
+const isProjectKnowledgePath = (pathname: string, projectId?: string) =>
+  Boolean(projectId) &&
+  (pathname.startsWith(Path.KnowledgeQuestionSQLPairs) ||
+    pathname.startsWith(Path.KnowledgeInstructions));
+
+const getActiveKey = (pathname: string, projectId?: string) => {
   if (pathname.startsWith(Path.Workflow)) return 'workflow';
   if (pathname.startsWith(Path.Applications)) return 'applications';
 
   if (
     pathname.startsWith(Path.Database) ||
     pathname.startsWith(Path.Modeling) ||
-    pathname.startsWith(Path.Onboarding)
+    pathname.startsWith(Path.Onboarding) ||
+    isProjectKnowledgePath(pathname, projectId)
   ) {
     return 'database';
   }
@@ -64,10 +73,11 @@ const getActiveKey = (pathname: string) => {
 
 export default function HeaderBar() {
   const router = useRouter();
-  const { pathname } = router;
+  const { pathname, query } = router;
+  const projectId = getQueryValue(query.projectId);
   const showNav = !pathname.startsWith(Path.Onboarding);
   const isModeling = pathname.startsWith(Path.Modeling);
-  const activeKey = getActiveKey(pathname);
+  const activeKey = getActiveKey(pathname, projectId);
 
   return (
     <StyledHeader>

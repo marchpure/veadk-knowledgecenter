@@ -1,9 +1,11 @@
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
+import { useRouter } from 'next/router';
 import { Button, message, Table, TableColumnsType, Typography } from 'antd';
 import { format } from 'sql-formatter';
 import SiderLayout from '@/components/layouts/SiderLayout';
 import PageLayout from '@/components/layouts/PageLayout';
+import HomeProjectReturn from '@/components/pages/home/HomeProjectReturn';
 import FunctionOutlined from '@ant-design/icons/FunctionOutlined';
 import { MORE_ACTION } from '@/utils/enum';
 import { getCompactTime } from '@/utils/time';
@@ -28,6 +30,10 @@ const SQLCodeBlock = dynamic(() => import('@/components/code/SQLCodeBlock'), {
 const { Paragraph, Text } = Typography;
 
 export default function ManageQuestionSQLPairs() {
+  const router = useRouter();
+  const projectId = Array.isArray(router.query.projectId)
+    ? router.query.projectId[0]
+    : router.query.projectId;
   const questionSqlPairModal = useModalAction();
   const sqlPairDrawer = useDrawerAction();
 
@@ -125,7 +131,11 @@ export default function ManageQuestionSQLPairs() {
   ];
 
   return (
-    <SiderLayout loading={false}>
+    <SiderLayout
+      loading={false}
+      sidebarTop={<HomeProjectReturn />}
+      hideSidebarAuxiliaryActions={Boolean(projectId)}
+    >
       <PageLayout
         title={
           <>

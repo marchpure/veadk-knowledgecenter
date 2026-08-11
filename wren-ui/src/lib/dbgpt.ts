@@ -133,7 +133,8 @@ export type ConnectorStatus =
   | 'active'
   | 'error'
   | 'disconnected'
-  | 'needs_reactivation';
+  | 'needs_reactivation'
+  | 'pending_verification';
 
 export type ConnectorAuthField = {
   name: string;
@@ -162,6 +163,8 @@ export type ConnectorInstance = {
   status: ConnectorStatus;
   config?: Record<string, unknown>;
   created_at?: string;
+  gmt_created?: string;
+  gmt_modified?: string;
   is_custom?: boolean;
 };
 
@@ -275,6 +278,7 @@ export type DbgptFlowDataEdge = {
   targetHandle?: string;
   id: string;
   type?: string;
+  data?: Record<string, unknown>;
 };
 
 export type DbgptFlowVariable = {
@@ -553,15 +557,28 @@ export function mapReactFlowToFlowData(flowData: DbgptFlowData): DbgptFlowData {
     ...flowData,
     nodes: (flowData.nodes || []).map((node) => {
       const { positionAbsolute, ...rest } = node;
+      const { onDirty: _onDirty, ...data } = (rest.data || {}) as Record<
+        string,
+        unknown
+      >;
       return {
         ...rest,
+        data: data as DbgptFlowNode,
         position_absolute: positionAbsolute,
       };
     }),
     edges: (flowData.edges || []).map((edge) => {
-      const { sourceHandle, targetHandle, ...rest } = edge;
-      return {
+      const { sourceHandle, targetHandle, ...rest } =
+        edge as DbgptFlowDataEdge & {
+          data?: Record<string, unknown>;
+        };
+      const { onDirty: _onDirty, ...data } = rest.data || {};
+      const next = {
         ...rest,
+        ...(Object.keys(data).length ? { data } : {}),
+      };
+      return {
+        ...next,
         source_handle: sourceHandle,
         target_handle: targetHandle,
       };

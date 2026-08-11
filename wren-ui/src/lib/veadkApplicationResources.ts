@@ -29,9 +29,21 @@ export type VeadkApplicationAskResponse = {
     data?: unknown[][];
   };
   runtimeError?: {
-    stage: 'sql_execution' | 'summary_generation';
+    stage: 'ask' | 'sql_execution' | 'summary_generation';
     message: string;
+    code?: string;
+    advice?: string;
   };
+};
+
+export type VeadkApplicationAskErrorPayload = {
+  error: string;
+  message?: string;
+  stage?: 'ask' | 'sql_execution' | 'summary_generation';
+  code?: string;
+  advice?: string;
+  sql?: string;
+  invalidSql?: string;
 };
 
 export const buildVeadkDataProductResourceKey = (projectId: number) =>
@@ -78,6 +90,33 @@ const getResourceCandidates = (resource: DbgptAppResource) => {
   ];
 };
 
+const normalizeResourceType = (value: unknown) =>
+  typeof value === 'string' ? value.trim().toLowerCase() : '';
+
+const dataProductResourceTypes = new Set([
+  'database',
+  'data_product',
+  'veadk_data_product',
+]);
+
+const isDataProductResource = (resource: DbgptAppResource) => {
+  const type = normalizeResourceType(resource.type);
+  return (
+    dataProductResourceTypes.has(type) &&
+    getResourceCandidates(resource).some(
+      (candidate) => parseVeadkDataProductResourceKey(candidate) !== null,
+    )
+  );
+};
+
+const hasNonDatabaseRuntimeResource = (app: DbgptApp) =>
+  (app.details || []).some((detail) =>
+    (detail.resources || []).some((resource) => {
+      const type = normalizeResourceType(resource.type);
+      return Boolean(type) && !dataProductResourceTypes.has(type);
+    }),
+  );
+
 export const findVeadkDataProductBinding = (
   app: DbgptApp,
   options: { selectParam?: string } = {},
@@ -109,9 +148,13 @@ export const findVeadkDataProductBinding = (
     };
   }
 
+  if (hasNonDatabaseRuntimeResource(app)) {
+    return null;
+  }
+
   for (const detail of app.details || []) {
     for (const resource of detail.resources || []) {
-      if (resource.type !== 'database') continue;
+      if (!isDataProductResource(resource)) continue;
       for (const candidate of getResourceCandidates(resource)) {
         const projectId = parseVeadkDataProductResourceKey(candidate);
         if (projectId) {

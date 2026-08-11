@@ -199,9 +199,26 @@ export class ModelResolver {
     return true;
   }
 
-  public async checkModelSync(_root: any, _args: any, ctx: IContext) {
-    const { id } = await ctx.projectService.getCurrentProject();
-    const { manifest } = await ctx.mdlService.makeCurrentModelMDL();
+  private async getScopedProject(
+    projectId: number | null | undefined,
+    ctx: IContext,
+  ) {
+    const project = projectId
+      ? await ctx.projectService.getProjectById(projectId)
+      : await ctx.projectService.getCurrentProject();
+    if (!project) {
+      throw new Error(`Project ${projectId} not found`);
+    }
+    return project;
+  }
+
+  public async checkModelSync(
+    _root: any,
+    args: { projectId?: number },
+    ctx: IContext,
+  ) {
+    const { id } = await this.getScopedProject(args.projectId, ctx);
+    const { manifest } = await ctx.mdlService.makeModelMDL(id);
     const currentHash = ctx.deployService.createMDLHash(manifest, id);
     const lastDeploy = await ctx.deployService.getLastDeployment(id);
     const lastDeployHash = lastDeploy?.hash;
@@ -217,10 +234,10 @@ export class ModelResolver {
 
   public async deploy(
     _root: any,
-    args: { force: boolean },
+    args: { force: boolean; projectId?: number },
     ctx: IContext,
   ): Promise<DeployResponse> {
-    const project = await ctx.projectService.getCurrentProject();
+    const project = await this.getScopedProject(args.projectId, ctx);
     if (!project.version && project.type !== DataSourceName.DUCKDB) {
       const version =
         await ctx.projectService.getProjectDataSourceVersion(project);
@@ -228,7 +245,7 @@ export class ModelResolver {
         version,
       });
     }
-    const { manifest } = await ctx.mdlService.makeCurrentModelMDL();
+    const { manifest } = await ctx.mdlService.makeModelMDL(project.id);
     const deployRes = await ctx.deployService.deploy(
       manifest,
       project.id,
@@ -236,7 +253,7 @@ export class ModelResolver {
     );
 
     // only generating for user's data source
-    if (project.sampleDataset === null) {
+    if (!args.projectId && project.sampleDataset === null) {
       await ctx.projectService.generateProjectRecommendationQuestions();
     }
     return deployRes;
@@ -250,8 +267,12 @@ export class ModelResolver {
     };
   }
 
-  public async listModels(_root: any, _args: any, ctx: IContext) {
-    const { id: projectId } = await ctx.projectService.getCurrentProject();
+  public async listModels(
+    _root: any,
+    args: { projectId?: number },
+    ctx: IContext,
+  ) {
+    const { id: projectId } = await this.getScopedProject(args.projectId, ctx);
     const models = await ctx.modelRepository.findAllBy({ projectId });
     const modelIds = models.map((m) => m.id);
     const modelColumnList =
@@ -339,6 +360,7 @@ export class ModelResolver {
         sourceTableName,
         fields,
         primaryKey,
+        args.data.projectId,
       );
       ctx.telemetry.sendEvent(TelemetryEvent.MODELING_CREATE_MODEL, {
         data: args.data,
@@ -360,8 +382,9 @@ export class ModelResolver {
     sourceTableName: string,
     fields: [string],
     primaryKey: string,
+    projectId?: number,
   ) {
-    const project = await ctx.projectService.getCurrentProject();
+    const project = await this.getScopedProject(projectId, ctx);
     const dataSourceTables =
       await ctx.projectService.getProjectDataSourceTables(project);
     this.validateTableExist(sourceTableName, dataSourceTables);
@@ -455,10 +478,16 @@ export class ModelResolver {
     fields: [string],
     primaryKey: string,
   ) {
-    const project = await ctx.projectService.getCurrentProject();
+    const model = await ctx.modelRepository.findOneBy({ id: args.where.id });
+    if (!model) {
+      throw new Error('Model not found');
+    }
+    const project = await this.getScopedProject(
+      args.data.projectId || Number(model.projectId),
+      ctx,
+    );
     const dataSourceTables =
       await ctx.projectService.getProjectDataSourceTables(project);
-    const model = await ctx.modelRepository.findOneBy({ id: args.where.id });
     const existingColumns = await ctx.modelColumnRepository.findAllBy({
       modelId: model.id,
       isCalculated: false,

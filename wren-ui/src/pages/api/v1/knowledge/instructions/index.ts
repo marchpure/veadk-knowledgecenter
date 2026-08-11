@@ -8,6 +8,7 @@ import {
 } from '@/apollo/server/utils/apiUtils';
 import { getLogger } from '@server/utils';
 import { isNil } from 'lodash';
+import { withApiProjectScope } from '@/server/apiProjectScope';
 
 const logger = getLogger('API_INSTRUCTIONS');
 logger.level = 'debug';
@@ -165,10 +166,7 @@ const handleCreateInstruction = async (
   });
 };
 
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse,
-) {
+async function handler(req: NextApiRequest, res: NextApiResponse) {
   const startTime = Date.now();
   let project;
 
@@ -205,3 +203,5 @@ export default async function handler(
     });
   }
 }
+
+export default withApiProjectScope(handler);

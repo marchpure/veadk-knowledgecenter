@@ -15,6 +15,7 @@ import {
   transformHistoryInput,
 } from '@/apollo/server/utils/apiUtils';
 import { DataSourceName } from '@server/types';
+import { withApiProjectScope } from '@/server/apiProjectScope';
 
 const logger = getLogger('API_GENERATE_SQL');
 logger.level = 'debug';
@@ -35,10 +36,7 @@ interface GenerateSqlRequest {
   returnSqlDialect?: boolean;
 }
 
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse,
-) {
+async function handler(req: NextApiRequest, res: NextApiResponse) {
   const {
     question,
     threadId,
@@ -164,3 +162,5 @@ export default async function handler(
     });
   }
 }
+
+export default withApiProjectScope(handler);

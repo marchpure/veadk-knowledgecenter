@@ -61,6 +61,87 @@ const buildRequestHistoryPayload = (input: RunVeadkApplicationAskInput) => ({
   threadId: input.threadId,
 });
 
+type ApplicationRuntimeStage = 'ask' | 'sql_execution' | 'summary_generation';
+
+export class ApplicationRuntimeError extends ApiError {
+  stage: ApplicationRuntimeStage;
+  advice?: string;
+
+  constructor({
+    message,
+    statusCode,
+    code,
+    stage,
+    advice,
+    additionalData,
+  }: {
+    message: string;
+    statusCode: number;
+    code?: Errors.GeneralErrorCodes;
+    stage: ApplicationRuntimeStage;
+    advice?: string;
+    additionalData?: Record<string, unknown>;
+  }) {
+    super(message, statusCode, code, {
+      ...(additionalData || {}),
+      stage,
+      ...(advice ? { advice } : {}),
+    });
+    this.stage = stage;
+    this.advice = advice;
+  }
+}
+
+const getUnknownErrorMessage = (error: unknown, fallback: string) => {
+  if (error instanceof Error && error.message?.trim()) {
+    return error.message.trim();
+  }
+  if (typeof error === 'string' && error.trim()) return error.trim();
+  if (error && typeof error === 'object') {
+    const record = error as Record<string, unknown>;
+    const candidates = [
+      record.message,
+      record.error,
+      record.err_msg,
+      record.detail,
+      record.reason,
+      record.code,
+    ];
+    const matched = candidates.find(
+      (item) => typeof item === 'string' && item.trim(),
+    );
+    if (typeof matched === 'string') return matched.trim();
+    try {
+      const serialized = JSON.stringify(error);
+      if (serialized && serialized !== '{}') return serialized;
+    } catch {
+      // Fall through to the fallback.
+    }
+  }
+  return fallback;
+};
+
+const createAskRuntimeError = (
+  error: unknown,
+  fallback: string,
+  options: {
+    statusCode?: number;
+    code?: Errors.GeneralErrorCodes;
+    advice?: string;
+    additionalData?: Record<string, unknown>;
+  } = {},
+) =>
+  new ApplicationRuntimeError({
+    message: getUnknownErrorMessage(error, fallback),
+    statusCode: options.statusCode || 502,
+    code: options.code || Errors.GeneralErrorCodes.AI_SERVICE_UNDEFINED_ERROR,
+    stage: 'ask',
+    advice:
+      options.advice ||
+      'Check the WrenAI service, redeploy the data product, or try a configured recommended question.',
+    additionalData: options.additionalData,
+  });
+
 export const listVeadkDataProductResources = async () => {
   const projects = await projectRepository.findAll({ order: 'id' });
   return projects.map((project) => ({
@@ -332,23 +413,59 @@ export const runVeadkApplicationAsk = async (
     });
   }
 
-  const askTask = await wrenAIAdaptor.ask({
-    query: input.question,
-    deployId: lastDeploy.hash,
-    histories: transformHistoryInput(histories) as any,
-    configurations: { language },
-  });
+  let askTask;
+  try {
+    askTask = await wrenAIAdaptor.ask({
+      query: input.question,
+      deployId: lastDeploy.hash,
+      histories: transformHistoryInput(histories) as any,
+      configurations: { language },
+    });
+  } catch (error) {
+    throw createAskRuntimeError(
+      error,
+      'Failed to create SQL generation task.',
+      {
+        advice:
+          'Check that the WrenAI service is reachable and redeploy the data product before asking again.',
+      },
+    );
+  }
+  if (!askTask?.queryId) {
+    throw createAskRuntimeError(
+      askTask,
+      'WrenAI did not return a query id for SQL generation.',
+      {
+        advice:
+          'Check the WrenAI service response and try a configured recommended question.',
+      },
+    );
+  }
 
   let askResult: AskResult;
   while (true) {
-    askResult = await wrenAIAdaptor.getAskResult(askTask.queryId);
+    try {
+      askResult = await wrenAIAdaptor.getAskResult(askTask.queryId);
+    } catch (error) {
+      throw createAskRuntimeError(
+        error,
+        'Failed to fetch SQL generation result from WrenAI.',
+        {
+          advice:
+            'Check the WrenAI service health, then retry or use a configured recommended question.',
+        },
+      );
+    }
     if (isAskResultFinished(askResult)) break;
     if (Date.now() > deadline) {
-      throw new ApiError(
-        'Timeout waiting for SQL generation',
-        500,
-        Errors.GeneralErrorCodes.POLLING_TIMEOUT,
-      );
+      throw new ApplicationRuntimeError({
+        message: 'Timeout waiting for SQL generation.',
+        statusCode: 504,
+        code: Errors.GeneralErrorCodes.POLLING_TIMEOUT,
+        stage: 'ask',
+        advice:
+          'Check the WrenAI service or ask a more specific question. Recommended questions avoid this generation path.',
+      });
     }
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
@@ -356,16 +473,33 @@ export const runVeadkApplicationAsk = async (
   if (askResult.error) {
     const additionalData: Record<string, unknown> = {};
     if (askResult.invalidSql) additionalData.invalidSql = askResult.invalidSql;
-    throw new ApiError(
-      (askResult.error as WrenAIError).message || 'Unknown ask error',
-      400,
-      askResult.error?.code || Errors.GeneralErrorCodes.INTERNAL_SERVER_ERROR,
+    throw new ApplicationRuntimeError({
+      message:
+        (askResult.error as WrenAIError).message ||
+        'WrenAI could not generate SQL for this question.',
+      statusCode: 400,
+      code: askResult.error?.code || Errors.GeneralErrorCodes.NO_RELEVANT_SQL,
+      stage: 'ask',
+      advice:
+        'Modify the question to reference the published data product, or use one of the recommended questions.',
       additionalData,
-    );
+    });
   }
 
   if (askResult.type === AskResultType.GENERAL) {
-    const stream = await wrenAIAdaptor.getAskStreamingResult(askTask.queryId);
+    let stream;
+    try {
+      stream = await wrenAIAdaptor.getAskStreamingResult(askTask.queryId);
+    } catch (error) {
+      throw createAskRuntimeError(
+        error,
+        'WrenAI returned a general answer but streaming failed.',
+        {
+          advice:
+            'Check the WrenAI streaming service, or ask a more specific data question.',
+        },
+      );
+    }
     const explanation = await collectTextStream(stream, () => {
       input.onRequestClose?.(stream);
     });
@@ -380,7 +514,14 @@ export const runVeadkApplicationAsk = async (
 
   const sql = askResult.response?.[0]?.sql;
   if (!sql) {
-    throw new ApiError('No SQL generated', 400);
+    throw new ApplicationRuntimeError({
+      message: 'No SQL generated for this question.',
+      statusCode: 400,
+      code: Errors.GeneralErrorCodes.NO_RELEVANT_SQL,
+      stage: 'ask',
+      advice:
+        'Modify the question to match the published tables or use a configured recommended question.',
+    });
   }
 
   return await runSqlAnswer({
@@ -424,11 +565,15 @@ const runSqlAnswer = async ({
       modelingOnly: false,
     });
   } catch (queryError: any) {
-    runtimeError = {
+    throw new ApplicationRuntimeError({
+      message: getUnknownErrorMessage(queryError, 'Error executing SQL query.'),
+      statusCode: 400,
+      code: Errors.GeneralErrorCodes.SQL_EXECUTION_ERROR,
       stage: 'sql_execution',
-      message: queryError?.message || 'Error executing SQL query',
-    };
-    sqlData = { columns: [], data: [] };
+      advice:
+        'Review the generated SQL, redeploy the data product, or use a configured recommended question.',
+      additionalData: { sql },
+    });
   }
 
   let summary =
@@ -481,9 +626,13 @@ const runSqlAnswer = async ({
     } catch (summaryError: any) {
       runtimeError = {
         stage: 'summary_generation',
-        message:
-          summaryError?.message ||
+        message: getUnknownErrorMessage(
+          summaryError,
           'Summary generation failed after SQL execution.',
+        ),
+        code: Errors.GeneralErrorCodes.AI_SERVICE_UNDEFINED_ERROR,
+        advice:
+          'The SQL and preview data are still available. Check WrenAI summary generation before retrying the narrative answer.',
       };
     }
   }

@@ -5,7 +5,10 @@
  */
 
 import { IIbisAdaptor } from '../adaptors/ibisAdaptor';
-import { IWrenEngineAdaptor } from '../adaptors/wrenEngineAdaptor';
+import {
+  DuckDBPrepareOptions,
+  IWrenEngineAdaptor,
+} from '../adaptors/wrenEngineAdaptor';
 import { Project } from '../repositories';
 import { DataSourceName } from '../types';
 import { getLogger } from '@server/utils';
@@ -69,6 +72,7 @@ export class DataSourceMetadataService implements IDataSourceMetadataService {
   public async listTables(project): Promise<CompactTable[]> {
     const { type: dataSource, connectionInfo } = project;
     if (dataSource === DataSourceName.DUCKDB) {
+      await this.prepareDuckDB(connectionInfo);
       const tables = await this.wrenEngineAdaptor.listTables();
       return tables;
     }
@@ -88,5 +92,23 @@ export class DataSourceMetadataService implements IDataSourceMetadataService {
   public async getVersion(project: Project): Promise<string> {
     const { type: dataSource, connectionInfo } = project;
     return await this.ibisAdaptor.getVersion(dataSource, connectionInfo);
+  }
+
+  private concatDuckDBInitSql(initSql = '', extensions: string[] = []) {
+    const installExtensions = extensions
+      .filter(Boolean)
+      .map((extension) => `INSTALL ${extension};`)
+      .join('\n');
+    return [installExtensions, initSql].filter(Boolean).join('\n');
+  }
+
+  private async prepareDuckDB(connectionInfo: any) {
+    await this.wrenEngineAdaptor.prepareDuckDB({
+      initSql: this.concatDuckDBInitSql(
+        connectionInfo?.initSql,
+        connectionInfo?.extensions || [],
+      ),
+      sessionProps: connectionInfo?.configurations || {},
+    } as DuckDBPrepareOptions);
   }
 }

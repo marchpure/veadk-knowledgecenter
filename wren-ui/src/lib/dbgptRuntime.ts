@@ -12,6 +12,7 @@ import {
   findVeadkDataProductBinding,
   hasAgentRuntimeContext,
   isLocalApplicationConversationId,
+  VeadkApplicationAskErrorPayload,
   VeadkApplicationAskResponse,
 } from '@/lib/veadkApplicationResources';
 
@@ -348,6 +349,7 @@ export type AppChatResult = {
   apiHistoryId?: string;
   localRuntime?: boolean;
   raw?: VeadkApplicationAskResponse;
+  errorPayload?: VeadkApplicationAskErrorPayload;
   runtime?: {
     source: 'veadk_data_product' | 'dbgpt';
     type?: string;
@@ -388,8 +390,7 @@ export const buildDbgptHistoryRounds = (
   const sortedHistory = history
     .map((message, index) => ({ message, index }))
     .sort((left, right) => {
-      const orderDelta =
-        (left.message.order || 0) - (right.message.order || 0);
+      const orderDelta = (left.message.order || 0) - (right.message.order || 0);
       return orderDelta || left.index - right.index;
     })
     .map((item) => item.message);
@@ -427,6 +428,22 @@ const createTimeoutSignal = (timeoutMs: number) => {
   };
 };
 
+const formatApplicationAskError = (
+  payload: VeadkApplicationAskErrorPayload,
+  status: number,
+) => {
+  const error =
+    payload?.error ||
+    payload?.message ||
+    `Application ask failed with HTTP ${status}`;
+  const details = [
+    payload?.stage ? `Stage: ${payload.stage}` : '',
+    payload?.code ? `Code: ${payload.code}` : '',
+    payload?.advice ? `Next step: ${payload.advice}` : '',
+  ].filter(Boolean);
+  return details.length ? `${error}\n\n${details.join('\n')}` : error;
+};
+
 export const sendAppChat = async (
   app: DbgptApp,
   convUid: string,
@@ -450,10 +467,14 @@ export const sendAppChat = async (
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(
-          payload?.error ||
-            `Application ask failed with HTTP ${response.status}`,
-        );
+        const error = new Error(
+          formatApplicationAskError(
+            payload as VeadkApplicationAskErrorPayload,
+            response.status,
+          ),
+        ) as Error & { payload?: VeadkApplicationAskErrorPayload };
+        error.payload = payload as VeadkApplicationAskErrorPayload;
+        throw error;
       }
       const result = payload as VeadkApplicationAskResponse;
       return {
@@ -488,9 +509,7 @@ export const sendAppChat = async (
     });
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(
-        errorText || `Chat failed with HTTP ${response.status}`,
-      );
+      throw new Error(errorText || `Chat failed with HTTP ${response.status}`);
     }
     const result = await readDbgptStreamResult(response);
     return {
@@ -721,6 +740,14 @@ const getBoundResourceNames = (app: DbgptApp) =>
     .filter(Boolean)
     .join(', ');
 
+const getBoundResourceTypes = (app: DbgptApp) =>
+  new Set(
+    (app.details || [])
+      .flatMap((detail) => detail.resources || [])
+      .map((resource) => resource.type)
+      .filter(Boolean),
+  );
+
 export const getAppRuntimeContract = (
   app: DbgptApp,
   options: { selectParam?: string } = {},
@@ -752,6 +779,31 @@ export const getAppRuntimeContract = (
 
   if (['single_agent', 'auto_plan'].includes(app.team_mode || '')) {
     const resources = getBoundResourceNames(app);
+    const resourceTypes = getBoundResourceTypes(app);
+    if (resourceTypes.has('knowledge')) {
+      return {
+        title: 'Knowledge application runtime',
+        dialogueMode: chatMode,
+        appSelector:
+          'DB-GPT loads the saved knowledge application by app_code.',
+        resourceSelector: resources
+          ? `Bound knowledge resource: ${resources}.`
+          : 'Knowledge space is selected from application resources.',
+        requestFields: baseFields,
+      };
+    }
+    if (resourceTypes.has('tool') || resourceTypes.has('tool(mcp(sse))')) {
+      return {
+        title: 'Tool connector application runtime',
+        dialogueMode: chatMode,
+        appSelector:
+          'DB-GPT loads the saved tool-backed application by app_code.',
+        resourceSelector: resources
+          ? `Bound tool connector: ${resources}.`
+          : 'Tool connector is selected from application resources.',
+        requestFields: baseFields,
+      };
+    }
     return {
       title:
         app.team_mode === 'single_agent'

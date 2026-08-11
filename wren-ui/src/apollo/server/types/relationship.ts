@@ -1,4 +1,5 @@
 export interface RelationData {
+  projectId?: number;
   fromModelId: number;
   fromColumnId: number;
   toModelId: number;
@@ -8,6 +9,7 @@ export interface RelationData {
 }
 
 export interface UpdateRelationData {
+  projectId?: number;
   type: RelationType;
 }
 

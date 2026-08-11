@@ -74,6 +74,8 @@ const CloudCTAContact = styled.div`
 
 type Props = (ModelingSidebarProps | HomeSidebarProps) & {
   onOpenSettings?: () => void;
+  hideAuxiliaryActions?: boolean;
+  topSlot?: React.ReactNode;
 };
 
 const DynamicSidebar = (
@@ -107,7 +109,7 @@ const DynamicSidebar = (
 };
 
 export default function Sidebar(props: Props) {
-  const { onOpenSettings } = props;
+  const { onOpenSettings, hideAuxiliaryActions, topSlot } = props;
   const router = useRouter();
 
   const onSettingsClick = (event) => {
@@ -117,67 +119,73 @@ export default function Sidebar(props: Props) {
 
   return (
     <Layout className="d-flex flex-column">
+      {topSlot}
       <DynamicSidebar {...props} pathname={router.pathname} />
-      <LearningSection />
-      <CloudCTA
-        href="https://cloud.getwren.ai/?utm_campaign=383986378-OSS%20Paid%20Conversion&utm_source=OSS%20UI&utm_medium=cta&utm_content=upgrade_cta"
-        target="_blank"
-        rel="noopener noreferrer"
-        data-ph-capture="true"
-        data-ph-capture-attribute-name="cta_go_to_cloud"
-      >
-        <CloudCTATitle>
-          <SparklesIcon className="mr-2" style={{ width: 16 }} />
-          Upgrade to Wren AI Cloud
-        </CloudCTATitle>
-        <div className="text-xs gray-8 mt-1">
-          Shared projects, embedded AI API, and enterprise-grade access control.
-        </div>
-      </CloudCTA>
-      <CloudCTAContact className="text-xs gray-8">
-        Need air-gapped or on-prem?{' '}
-        <Link
-          className="geekblue-6"
-          style={{ textDecoration: 'underline' }}
-          href="https://www.getwren.ai/en/contact?utm_campaign=383986378-OSS%20Paid%20Conversion&utm_source=OSS%20UI&utm_medium=cta&utm_content=talk_to_sales"
-          target="_blank"
-          rel="noopener noreferrer"
-          data-ph-capture="true"
-          data-ph-capture-attribute-name="cta_talk_to_sales"
-        >
-          Talk to sales
-        </Link>
-      </CloudCTAContact>
-      <div className="border-t border-gray-4 pt-2">
-        <StyledButton type="text" block onClick={onSettingsClick}>
-          <SettingOutlined className="text-md" />
-          Settings
-        </StyledButton>
-        <StyledButton type="text" block>
-          <Link
-            className="d-flex align-center"
-            href="https://discord.com/invite/5DvshJqG8Z"
+      {!hideAuxiliaryActions && (
+        <>
+          <LearningSection />
+          <CloudCTA
+            href="https://cloud.getwren.ai/?utm_campaign=383986378-OSS%20Paid%20Conversion&utm_source=OSS%20UI&utm_medium=cta&utm_content=upgrade_cta"
             target="_blank"
             rel="noopener noreferrer"
             data-ph-capture="true"
-            data-ph-capture-attribute-name="cta_go_to_discord"
+            data-ph-capture-attribute-name="cta_go_to_cloud"
           >
-            <DiscordIcon className="mr-2" style={{ width: 16 }} /> Discord
-          </Link>
-        </StyledButton>
-        <StyledButton type="text" block>
-          <Link
-            className="d-flex align-center"
-            href="https://github.com/Canner/WrenAI"
-            target="_blank"
-            rel="noopener noreferrer"
-            data-ph-capture="true"
-            data-ph-capture-attribute-name="cta_go_to_github"
-          >
-            <GithubIcon className="mr-2" style={{ width: 16 }} /> GitHub
-          </Link>
-        </StyledButton>
-      </div>
+            <CloudCTATitle>
+              <SparklesIcon className="mr-2" style={{ width: 16 }} />
+              Upgrade to Wren AI Cloud
+            </CloudCTATitle>
+            <div className="text-xs gray-8 mt-1">
+              Shared projects, embedded AI API, and enterprise-grade access
+              control.
+            </div>
+          </CloudCTA>
+          <CloudCTAContact className="text-xs gray-8">
+            Need air-gapped or on-prem?{' '}
+            <Link
+              className="geekblue-6"
+              style={{ textDecoration: 'underline' }}
+              href="https://www.getwren.ai/en/contact?utm_campaign=383986378-OSS%20Paid%20Conversion&utm_source=OSS%20UI&utm_medium=cta&utm_content=talk_to_sales"
+              target="_blank"
+              rel="noopener noreferrer"
+              data-ph-capture="true"
+              data-ph-capture-attribute-name="cta_talk_to_sales"
+            >
+              Talk to sales
+            </Link>
+          </CloudCTAContact>
+          <div className="border-t border-gray-4 pt-2">
+            <StyledButton type="text" block onClick={onSettingsClick}>
+              <SettingOutlined className="text-md" />
+              Settings
+            </StyledButton>
+            <StyledButton type="text" block>
+              <Link
+                className="d-flex align-center"
+                href="https://discord.com/invite/5DvshJqG8Z"
+                target="_blank"
+                rel="noopener noreferrer"
+                data-ph-capture="true"
+                data-ph-capture-attribute-name="cta_go_to_discord"
+              >
+                <DiscordIcon className="mr-2" style={{ width: 16 }} /> Discord
+              </Link>
+            </StyledButton>
+            <StyledButton type="text" block>
+              <Link
+                className="d-flex align-center"
+                href="https://github.com/Canner/WrenAI"
+                target="_blank"
+                rel="noopener noreferrer"
+                data-ph-capture="true"
+                data-ph-capture-attribute-name="cta_go_to_github"
+              >
+                <GithubIcon className="mr-2" style={{ width: 16 }} /> GitHub
+              </Link>
+            </StyledButton>
+          </div>
+        </>
+      )}
     </Layout>
   );
 }

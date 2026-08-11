@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { useRouter } from 'next/router';
 import {
   Button,
   Tag,
@@ -10,6 +11,7 @@ import {
 import styled from 'styled-components';
 import SiderLayout from '@/components/layouts/SiderLayout';
 import PageLayout from '@/components/layouts/PageLayout';
+import HomeProjectReturn from '@/components/pages/home/HomeProjectReturn';
 import { InstructionsSVG } from '@/utils/svgs';
 import QuestionOutlined from '@ant-design/icons/QuestionOutlined';
 import { MORE_ACTION } from '@/utils/enum';
@@ -49,6 +51,10 @@ const StyledInstructionsIcon = styled(InstructionsSVG)`
 `;
 
 export default function ManageInstructions() {
+  const router = useRouter();
+  const projectId = Array.isArray(router.query.projectId)
+    ? router.query.projectId[0]
+    : router.query.projectId;
   const instructionModal = useModalAction();
   const instructionDrawer = useDrawerAction();
 
@@ -166,7 +172,11 @@ export default function ManageInstructions() {
   ];
 
   return (
-    <SiderLayout loading={false}>
+    <SiderLayout
+      loading={false}
+      sidebarTop={<HomeProjectReturn />}
+      hideSidebarAuxiliaryActions={Boolean(projectId)}
+    >
       <PageLayout
         title={
           <>

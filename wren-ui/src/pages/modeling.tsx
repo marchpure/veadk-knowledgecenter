@@ -7,6 +7,7 @@ import styled from 'styled-components';
 import { MORE_ACTION, NODE_TYPE } from '@/utils/enum';
 import { editCalculatedField } from '@/utils/modelingHelper';
 import SiderLayout from '@/components/layouts/SiderLayout';
+import HomeProjectReturn from '@/components/pages/home/HomeProjectReturn';
 import MetadataDrawer from '@/components/pages/modeling/MetadataDrawer';
 import EditMetadataModal from '@/components/pages/modeling/EditMetadataModal';
 import CalculatedFieldModal from '@/components/modals/CalculatedFieldModal';
@@ -61,8 +62,15 @@ export default function Modeling() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const diagramRef = useRef(null);
+  const rawProjectId = searchParams.get('projectId');
+  const parsedProjectId = rawProjectId ? Number(rawProjectId) : undefined;
+  const scopedVariables =
+    Number.isFinite(parsedProjectId) && parsedProjectId > 0
+      ? { projectId: parsedProjectId }
+      : undefined;
 
   const { data } = useDiagramQuery({
+    variables: scopedVariables,
     fetchPolicy: 'cache-and-network',
     onCompleted: () => {
       diagramRef.current?.fitView();
@@ -70,12 +78,16 @@ export default function Modeling() {
   });
 
   const deployStatusQueryResult = useDeployStatusQuery({
+    variables: scopedVariables,
     pollInterval: 1000,
     fetchPolicy: 'no-cache',
   });
 
-  const refetchQueries = [{ query: DIAGRAM }];
-  const refetchQueriesForModel = [...refetchQueries, { query: LIST_MODELS }];
+  const refetchQueries = [{ query: DIAGRAM, variables: scopedVariables }];
+  const refetchQueriesForModel = [
+    ...refetchQueries,
+    { query: LIST_MODELS, variables: scopedVariables },
+  ];
   const getBaseOptions = (options) => {
     return {
       onError: (error) => console.error(error),
@@ -378,11 +390,19 @@ export default function Modeling() {
   const relationshipLoading = relationshipUpdating || relationshipCreating;
 
   return (
-    <DeployStatusContext.Provider value={{ ...deployStatusQueryResult }}>
+    <DeployStatusContext.Provider
+      value={{
+        ...deployStatusQueryResult,
+        projectId: scopedVariables?.projectId,
+      }}
+    >
       <SiderLayout
         loading={diagramData === null}
+        sidebarTop={<HomeProjectReturn />}
+        hideSidebarAuxiliaryActions
         sidebar={{
           data: diagramData,
+          projectId: scopedVariables?.projectId,
           onOpenModelDrawer: modelDrawer.openDrawer,
           onSelect,
         }}
@@ -430,13 +450,19 @@ export default function Modeling() {
         />
         <ModelDrawer
           {...modelDrawer.state}
+          projectId={scopedVariables?.projectId}
           onClose={modelDrawer.closeDrawer}
           submitting={modelLoading}
           onSubmit={async ({ id, data }) => {
+            const scopedData = scopedVariables
+              ? { ...data, projectId: scopedVariables.projectId }
+              : data;
             if (id) {
-              await updateModelMutation({ variables: { where: { id }, data } });
+              await updateModelMutation({
+                variables: { where: { id }, data: scopedData },
+              });
             } else {
-              await createModelMutation({ variables: { data } });
+              await createModelMutation({ variables: { data: scopedData } });
             }
           }}
         />
@@ -456,6 +482,7 @@ export default function Modeling() {
         />
         <RelationModal
           {...relationshipModal.state}
+          projectId={scopedVariables?.projectId}
           onClose={relationshipModal.onClose}
           loading={relationshipLoading}
           onSubmit={async (
@@ -466,13 +493,14 @@ export default function Modeling() {
               await updateRelationshipMutation({
                 variables: {
                   where: { id: values.relationId },
-                  data: { type: relation.type },
+                  data: { type: relation.type, ...(scopedVariables || {}) },
                 },
               });
             } else {
               await createRelationshipMutation({
                 variables: {
                   data: {
+                    ...(scopedVariables || {}),
                     fromModelId: Number(relation.fromField.modelId),
                     fromColumnId: Number(relation.fromField.fieldId),
                     toModelId: Number(relation.toField.modelId),

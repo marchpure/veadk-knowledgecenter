@@ -60,6 +60,7 @@ import {
 } from '@/lib/dbgptRuntime';
 import {
   VeadkApplicationAskResponse,
+  VeadkApplicationAskErrorPayload,
   findVeadkDataProductBinding,
   isLocalApplicationConversationId,
 } from '@/lib/veadkApplicationResources';
@@ -75,6 +76,7 @@ type RuntimeMessage = {
   apiHistoryId?: string;
   pending?: boolean;
   error?: boolean;
+  errorPayload?: VeadkApplicationAskErrorPayload;
   localRuntime?: boolean;
   result?: VeadkApplicationAskResponse;
   runtime?: AppChatResult['runtime'];
@@ -455,6 +457,27 @@ const getNativeRuntimeResource = (app: DbgptApp | null) => {
   return runtimeSelectableResourceTypes.has(type) ? type : undefined;
 };
 
+const getPendingText = (
+  runtimeContract: ReturnType<typeof getAppRuntimeContract> | null,
+  localRuntime: boolean,
+) => {
+  if (localRuntime) return 'Analyzing the bound data product...';
+  const title = runtimeContract?.title || '';
+  if (/knowledge/i.test(title)) return 'Searching the knowledge space...';
+  if (/tool/i.test(title)) return 'Calling the selected tool...';
+  if (/workflow|awel/i.test(title)) return 'Running the workflow...';
+  return 'Asking the application...';
+};
+
+const getErrorStageLabel = (stage?: string) => {
+  if (stage === 'sql_execution') return 'SQL execution failed';
+  if (stage === 'summary_generation') return 'Summary generation degraded';
+  if (stage === 'ask') return 'SQL generation failed';
+  if (stage === 'tool_call') return 'Tool call failed';
+  if (stage === 'workflow') return 'Workflow node failed';
+  return 'Application runtime failed';
+};
+
 const copyToClipboard = async (value: string) => {
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(value);
@@ -607,7 +630,9 @@ const reconcileRouteSession = (
     if (matchedBySession) {
       return {
         sessions: stored.map((item) =>
-          item.id === routeSessionId && routeConvUid && item.convUid !== routeConvUid
+          item.id === routeSessionId &&
+          routeConvUid &&
+          item.convUid !== routeConvUid
             ? { ...item, convUid: routeConvUid }
             : item,
         ),
@@ -665,7 +690,8 @@ const createMessagesFromDbgptHistory = (
 ): RuntimeMessage[] =>
   rounds.flatMap((round, index) => {
     const createdAt =
-      round.createdAt || new Date(Date.now() - (rounds.length - index)).toISOString();
+      round.createdAt ||
+      new Date(Date.now() - (rounds.length - index)).toISOString();
     const messageBaseId = `${round.order || index + 1}-${createdAt}`;
     return [
       {
@@ -691,7 +717,8 @@ const shouldRestoreDbgptHistory = (session: RuntimeSession) =>
   Boolean(
     session.convUid &&
       !isLocalApplicationConversationId(session.convUid) &&
-      (!session.messages.length || session.messages.some((item) => item.pending)),
+      (!session.messages.length ||
+        session.messages.some((item) => item.pending)),
   );
 
 const normalizeCell = (value: unknown) => {
@@ -744,13 +771,7 @@ const formatSessionTime = (value: string) => {
   });
 };
 
-function TabLabel({
-  icon,
-  label,
-}: {
-  icon: React.ReactNode;
-  label: string;
-}) {
+function TabLabel({ icon, label }: { icon: React.ReactNode; label: string }) {
   return (
     <div className="select-none">
       <span className="mr-2">{icon}</span>
@@ -772,6 +793,7 @@ function ShareAnswerButton({
     <Button
       size="small"
       icon={<ShareAltOutlined />}
+      data-testid="share-answer-button"
       disabled={Boolean(disabledReason)}
       loading={loading}
       onClick={onClick}
@@ -781,14 +803,20 @@ function ShareAnswerButton({
   );
   return disabledReason ? (
     <Tooltip title={disabledReason}>
-      <span>{button}</span>
+      <span data-testid="share-answer-disabled" aria-label={disabledReason}>
+        {button}
+      </span>
     </Tooltip>
   ) : (
     button
   );
 }
 
-function RuntimeDataTable({ result }: { result?: VeadkApplicationAskResponse }) {
+function RuntimeDataTable({
+  result,
+}: {
+  result?: VeadkApplicationAskResponse;
+}) {
   const rows = getResultRows(result);
   const columns = getResultColumns(result);
   if (!rows.length) {
@@ -831,14 +859,17 @@ function RuntimeEventList({
   return (
     <>
       {events.map((event, index) => (
-        <RuntimeEventCard key={`${event.kind}-${index}`}>
+        <RuntimeEventCard
+          key={`${event.kind}-${index}`}
+          data-testid={`runtime-event-${event.kind}`}
+        >
           <div className="d-flex justify-space-between align-center mb-2">
             <Text strong>{event.title}</Text>
             <Tag>{event.kind}</Tag>
           </div>
           {event.content && <DbgptRuntimeContent content={event.content} />}
           {event.payload !== undefined && (
-            <CodeBlock>{JSON.stringify(event.payload, null, 2)}</CodeBlock>
+            <DbgptRuntimeContent payload={event.payload} />
           )}
         </RuntimeEventCard>
       ))}
@@ -881,7 +912,9 @@ function RuntimeContractView({
         <RuntimeCard>
           <Text className="gray-7 text-sm">Chat mode</Text>
           <div>
-            <Text strong>{runtimeRoute?.mode || runtimeContract?.dialogueMode}</Text>
+            <Text strong>
+              {runtimeRoute?.mode || runtimeContract?.dialogueMode}
+            </Text>
           </div>
         </RuntimeCard>
         <RuntimeCard>
@@ -980,6 +1013,7 @@ function ApplicationAnswerBlock({
   sharing,
   onShareAnswer,
   onCopyApiPayload,
+  onRetry,
 }: {
   message: RuntimeMessage;
   runtimeRoute?: RuntimeRoute | null;
@@ -993,15 +1027,19 @@ function ApplicationAnswerBlock({
   sharing: boolean;
   onShareAnswer: (message: RuntimeMessage) => void;
   onCopyApiPayload: () => void;
+  onRetry: (question: string) => void;
 }) {
   const result = runtimeMessage.result;
   const isSqlQuery = result?.type === 'SQL_QUERY';
   const isNonSqlQuery = result?.type === 'NON_SQL_QUERY';
   const isLocalRuntime =
-    runtimeMessage.localRuntime || runtimeMessage.runtime?.source === 'veadk_data_product';
+    runtimeMessage.localRuntime ||
+    runtimeMessage.runtime?.source === 'veadk_data_product';
   const dbgptRuntimeError = Boolean(
     !isLocalRuntime &&
-      runtimeMessage.content.match(/^\s*(\[[^\]]*error[^\]]*\]|DB-GPT model authorization failed|Chat failed with HTTP)/i),
+      runtimeMessage.content.match(
+        /^\s*(\[[^\]]*error[^\]]*\]|DB-GPT model authorization failed|Chat failed with HTTP)/i,
+      ),
   );
   const shareDisabledReason = runtimeMessage.pending
     ? 'Wait for this answer to finish before sharing.'
@@ -1014,7 +1052,10 @@ function ApplicationAnswerBlock({
           : undefined;
 
   return (
-    <AnswerBlock data-jsid="applicationAnswerResult">
+    <AnswerBlock
+      data-jsid="applicationAnswerResult"
+      data-testid="application-answer-result"
+    >
       <QuestionTitle level={4}>
         <MessageOutlined className="geekblue-5 mt-1 mr-3" />
         <Text className="text-medium gray-8">
@@ -1023,25 +1064,28 @@ function ApplicationAnswerBlock({
       </QuestionTitle>
 
       {runtimeMessage.pending && (
-        <div className="bg-white border border-gray-4 rounded p-5">
+        <div
+          className="bg-white border border-gray-4 rounded p-5"
+          data-testid="application-answer-pending"
+        >
           <div className="d-flex align-center mb-4">
             <Spin size="small" className="mr-2" />
             <Text>{runtimeMessage.content}</Text>
           </div>
-          <Skeleton active paragraph={{ rows: 4 }} title={false} />
+          <div data-testid="application-answer-skeleton">
+            <Skeleton active paragraph={{ rows: 4 }} title={false} />
+          </div>
+          <AnswerFooter>
+            <ShareAnswerButton
+              disabledReason={shareDisabledReason}
+              loading={false}
+              onClick={() => onShareAnswer(runtimeMessage)}
+            />
+          </AnswerFooter>
         </div>
       )}
 
-      {!runtimeMessage.pending && runtimeMessage.error && (
-        <Alert
-          type="error"
-          showIcon
-          message="Application runtime failed"
-          description={runtimeMessage.content}
-        />
-      )}
-
-      {!runtimeMessage.pending && !runtimeMessage.error && (
+      {!runtimeMessage.pending && (
         <>
           <StyledTabs type="card" size="small">
             <Tabs.TabPane
@@ -1054,7 +1098,38 @@ function ApplicationAnswerBlock({
               }
             >
               <TabInner>
-                {result?.runtimeError && (
+                {runtimeMessage.error ? (
+                  <Alert
+                    type="error"
+                    showIcon
+                    message={getErrorStageLabel(
+                      runtimeMessage.errorPayload?.stage,
+                    )}
+                    description={
+                      <div>
+                        <Paragraph className="mb-2">
+                          {runtimeMessage.content}
+                        </Paragraph>
+                        {runtimeMessage.errorPayload?.advice && (
+                          <Paragraph className="mb-0">
+                            <Text strong>Next step: </Text>
+                            {runtimeMessage.errorPayload.advice}
+                          </Paragraph>
+                        )}
+                      </div>
+                    }
+                    action={
+                      runtimeMessage.question ? (
+                        <Button
+                          size="small"
+                          onClick={() => onRetry(runtimeMessage.question || '')}
+                        >
+                          Retry
+                        </Button>
+                      ) : undefined
+                    }
+                  />
+                ) : result?.runtimeError ? (
                   <Alert
                     className="mb-4"
                     type="warning"
@@ -1062,28 +1137,29 @@ function ApplicationAnswerBlock({
                     message={`Runtime degraded at ${result.runtimeError.stage}`}
                     description={result.runtimeError.message}
                   />
-                )}
-                {dbgptRuntimeError ? (
-                  <Alert
-                    type="error"
-                    showIcon
-                    message="Runtime returned an error"
-                    description={
-                      <DbgptRuntimeContent content={runtimeMessage.content} />
-                    }
-                  />
-                ) : isNonSqlQuery ? (
-                  <DbgptRuntimeContent
-                    content={result?.explanation || runtimeMessage.content}
-                  />
-                ) : (
-                  <DbgptRuntimeContent
-                    content={result?.summary || runtimeMessage.content}
-                  />
-                )}
+                ) : null}
+                {!runtimeMessage.error &&
+                  (dbgptRuntimeError ? (
+                    <Alert
+                      type="error"
+                      showIcon
+                      message="Runtime returned an error"
+                      description={
+                        <DbgptRuntimeContent content={runtimeMessage.content} />
+                      }
+                    />
+                  ) : isNonSqlQuery ? (
+                    <DbgptRuntimeContent
+                      content={result?.explanation || runtimeMessage.content}
+                    />
+                  ) : (
+                    <DbgptRuntimeContent
+                      content={result?.summary || runtimeMessage.content}
+                    />
+                  ))}
               </TabInner>
             </Tabs.TabPane>
-            {isSqlQuery && (
+            {!runtimeMessage.error && isSqlQuery && (
               <Tabs.TabPane
                 key="data"
                 tab={<TabLabel icon={<DatabaseOutlined />} label="Data" />}
@@ -1093,7 +1169,7 @@ function ApplicationAnswerBlock({
                 </TabInner>
               </Tabs.TabPane>
             )}
-            {isSqlQuery && (
+            {!runtimeMessage.error && isSqlQuery && (
               <Tabs.TabPane
                 key="sql"
                 tab={<TabLabel icon={<CodeOutlined />} label="SQL" />}
@@ -1103,7 +1179,7 @@ function ApplicationAnswerBlock({
                 </TabInner>
               </Tabs.TabPane>
             )}
-            {isSqlQuery && result && (
+            {!runtimeMessage.error && isSqlQuery && result && (
               <Tabs.TabPane
                 key="chart"
                 tab={<TabLabel icon={<BarChartOutlined />} label="Chart" />}
@@ -1153,7 +1229,9 @@ function ApplicationAnswerBlock({
                       <RuntimeCard>
                         <Text className="gray-7 text-sm">Project</Text>
                         <div>
-                          <Text strong>{result?.project?.displayName || '-'}</Text>
+                          <Text strong>
+                            {result?.project?.displayName || '-'}
+                          </Text>
                         </div>
                       </RuntimeCard>
                     </RuntimeGrid>
@@ -1235,6 +1313,7 @@ export default function ApplicationRunPage() {
   const [resourceLoading, setResourceLoading] = useState(false);
   const [dataProductInfo, setDataProductInfo] =
     useState<DataProductRuntimeInfo | null>(null);
+  const [dataProductError, setDataProductError] = useState('');
   const contentRef = useRef<HTMLDivElement>(null);
   const loadedSessionsAppCodeRef = useRef('');
 
@@ -1357,8 +1436,7 @@ export default function ApplicationRunPage() {
         const restoredMessages = createMessagesFromDbgptHistory(rounds);
         setSessions((current) =>
           current.map((session) =>
-            session.id === targetSessionId &&
-            session.convUid === targetConvUid
+            session.id === targetSessionId && session.convUid === targetConvUid
               ? {
                   ...session,
                   title:
@@ -1448,6 +1526,7 @@ export default function ApplicationRunPage() {
   const canSend = Boolean(
     runnable &&
       activeSession &&
+      !dataProductError &&
       (!runtimeResourceType || runtimeResource) &&
       !running,
   );
@@ -1528,8 +1607,10 @@ export default function ApplicationRunPage() {
   useEffect(() => {
     if (!dataProductBinding?.projectId) {
       setDataProductInfo(null);
+      setDataProductError('');
       return;
     }
+    setDataProductError('');
     fetch(`/api/applications/data-products/${dataProductBinding.projectId}`)
       .then(async (response) => {
         const payload = await response.json().catch(() => ({}));
@@ -1539,7 +1620,14 @@ export default function ApplicationRunPage() {
         return payload as DataProductRuntimeInfo;
       })
       .then(setDataProductInfo)
-      .catch(() => setDataProductInfo(null));
+      .catch((err) => {
+        setDataProductInfo(null);
+        setDataProductError(
+          err instanceof Error
+            ? err.message
+            : 'Data product is unavailable in the current runtime.',
+        );
+      });
   }, [dataProductBinding?.projectId]);
 
   const updateActiveSession = useCallback(
@@ -1632,9 +1720,7 @@ export default function ApplicationRunPage() {
       id: pendingMessageId,
       role: 'assistant',
       question: trimmed,
-      content: localRuntime
-        ? 'Analyzing the bound data product...'
-        : 'Asking the application...',
+      content: getPendingText(runtimeContract, localRuntime),
       pending: true,
       localRuntime,
       createdAt,
@@ -1658,7 +1744,7 @@ export default function ApplicationRunPage() {
         sendAppChat(app, currentConvUid, trimmed, {
           selectParam: runtimeResourceType ? runtimeResource : undefined,
         }),
-        wait(350),
+        wait(700),
       ]);
       updateActiveSession((session) => ({
         ...session,
@@ -1679,6 +1765,11 @@ export default function ApplicationRunPage() {
         updatedAt: new Date().toISOString(),
       }));
     } catch (err) {
+      const errorPayload =
+        err instanceof Error && 'payload' in err
+          ? ((err as Error & { payload?: VeadkApplicationAskErrorPayload })
+              .payload as VeadkApplicationAskErrorPayload | undefined)
+          : undefined;
       updateActiveSession((session) => ({
         ...session,
         messages: session.messages.map((item) =>
@@ -1691,6 +1782,7 @@ export default function ApplicationRunPage() {
                     : 'Application chat failed.',
                 pending: false,
                 error: true,
+                errorPayload,
               }
             : item,
         ),
@@ -1735,11 +1827,24 @@ export default function ApplicationRunPage() {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(payload?.error || 'Unable to create share link.');
+        const details = [
+          payload?.error || 'Unable to create share link.',
+          payload?.stage ? `Stage: ${payload.stage}` : '',
+          payload?.advice ? `Next step: ${payload.advice}` : '',
+        ].filter(Boolean);
+        throw new Error(details.join('\n'));
       }
       const shareUrl = getApplicationResultShareUrl(payload.token);
-      await copyToClipboard(shareUrl);
-      message.success('Application result link copied.');
+      try {
+        await copyToClipboard(shareUrl);
+        message.success('Application result link copied.');
+      } catch {
+        Modal.info({
+          title: 'Application result link',
+          content: <Text copyable>{shareUrl}</Text>,
+          okText: 'Close',
+        });
+      }
     } catch (err) {
       message.error(
         err instanceof Error
@@ -1765,7 +1870,8 @@ export default function ApplicationRunPage() {
           item.role === 'assistant' &&
           !item.pending &&
           !item.error &&
-          (item.localRuntime || isLocalApplicationConversationId(activeSession.convUid)) &&
+          (item.localRuntime ||
+            isLocalApplicationConversationId(activeSession.convUid)) &&
           item.apiHistoryId,
       );
     if (latestLocalAnswer) {
@@ -1774,7 +1880,9 @@ export default function ApplicationRunPage() {
     }
 
     if (isLocalApplicationConversationId(activeSession.convUid)) {
-      message.warning('This conversation does not have a shareable result yet.');
+      message.warning(
+        'This conversation does not have a shareable result yet.',
+      );
       return;
     }
 
@@ -1865,6 +1973,7 @@ export default function ApplicationRunPage() {
                 block
                 icon={<PlusOutlined />}
                 type="primary"
+                data-testid="runtime-new-thread"
                 onClick={startNewSession}
               >
                 New
@@ -1893,6 +2002,7 @@ export default function ApplicationRunPage() {
               {sortedSessions.map((session) => (
                 <ThreadItem
                   key={session.id}
+                  data-testid="runtime-thread-item"
                   $selected={session.id === activeSessionId}
                   role="button"
                   tabIndex={0}
@@ -1924,6 +2034,7 @@ export default function ApplicationRunPage() {
                     <Button
                       type="text"
                       size="small"
+                      data-testid="runtime-delete-thread"
                       icon={<DeleteOutlined />}
                       onClick={(event) => event.stopPropagation()}
                     />
@@ -1983,11 +2094,16 @@ export default function ApplicationRunPage() {
                   onChange={onRuntimeResourceChange}
                 />
               )}
-              <Button icon={<CopyOutlined />} disabled={!app} onClick={copyAppLink}>
+              <Button
+                icon={<CopyOutlined />}
+                disabled={!app}
+                onClick={copyAppLink}
+              >
                 Copy link
               </Button>
               <Button
                 icon={<ShareAltOutlined />}
+                data-testid="share-latest-button"
                 disabled={!activeSession?.convUid || !messages.length}
                 loading={sharingMessageId === 'conversation'}
                 onClick={shareConversation}
@@ -2049,6 +2165,25 @@ export default function ApplicationRunPage() {
                       description="The selected resource is sent as select_param for this runtime session."
                     />
                   )}
+                  {dataProductError && (
+                    <Alert
+                      className="mb-5"
+                      type="error"
+                      showIcon
+                      message="Data product unavailable"
+                      description={dataProductError}
+                      action={
+                        <Button
+                          size="small"
+                          onClick={() => {
+                            if (app) router.push(getConfigureUrl(app.app_code));
+                          }}
+                        >
+                          Configure
+                        </Button>
+                      }
+                    />
+                  )}
 
                   {answerMessages.length && app ? (
                     answerMessages.map((item) => (
@@ -2066,6 +2201,7 @@ export default function ApplicationRunPage() {
                         sharing={sharingMessageId === item.id}
                         onShareAnswer={shareLocalAnswer}
                         onCopyApiPayload={copyApiPayload}
+                        onRetry={(retryQuestion) => send(retryQuestion)}
                       />
                     ))
                   ) : (
@@ -2083,6 +2219,7 @@ export default function ApplicationRunPage() {
                           <SuggestedQuestions>
                             {recommendedQuestions.map((item, index) => (
                               <Button
+                                data-testid="recommended-question"
                                 key={`${item.question}-${index}`}
                                 disabled={!canSend}
                                 onClick={() => send(item.question)}
@@ -2121,13 +2258,18 @@ export default function ApplicationRunPage() {
                     />
                     <ComposerFooter>
                       <Text className="gray-7 text-sm">
-                        {activeSession?.convUid
-                          ? 'Runtime thread active'
-                          : 'New runtime thread'}
+                        {!runnable
+                          ? 'Publish and complete configuration before asking'
+                          : runtimeResourceType && !runtimeResource
+                            ? `Select a ${runtimeResourceType} first`
+                            : activeSession?.convUid
+                              ? 'Runtime thread active'
+                              : 'New runtime thread'}
                       </Text>
                       <Button
                         type="primary"
                         icon={<SendOutlined />}
+                        data-testid="runtime-send-button"
                         disabled={!canSend || !question.trim()}
                         loading={running}
                         onClick={() => send()}

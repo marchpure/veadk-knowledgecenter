@@ -14,6 +14,7 @@ import { Path } from '@/utils/enum';
 import useHomeSidebar from '@/hooks/useHomeSidebar';
 import SiderLayout from '@/components/layouts/SiderLayout';
 import Prompt from '@/components/pages/home/prompt';
+import HomeProjectReturn from '@/components/pages/home/HomeProjectReturn';
 import useAskPrompt, {
   getIsFinished,
   canFetchThreadResponse,
@@ -49,6 +50,9 @@ import {
 } from '@/apollo/client/graphql/__types__';
 import { useCreateSqlPairMutation } from '@/apollo/client/graphql/sqlPairs.generated';
 
+const getQueryValue = (value: string | string[] | undefined) =>
+  Array.isArray(value) ? value[0] : value;
+
 const getThreadResponseIsFinished = (threadResponse: ThreadResponse) => {
   const { answerDetail, breakdownDetail, chartDetail } = threadResponse || {};
   // it means it's the old data before support text based answer
@@ -73,6 +77,7 @@ const getThreadResponseIsFinished = (threadResponse: ThreadResponse) => {
 export default function HomeThread() {
   const $prompt = useRef<ComponentRef<typeof Prompt>>(null);
   const router = useRouter();
+  const projectId = getQueryValue(router.query.projectId);
   const params = useParams();
   const homeSidebar = useHomeSidebar();
   const threadId = useMemo(() => Number(params?.id) || null, [params]);
@@ -332,7 +337,12 @@ export default function HomeThread() {
   };
 
   return (
-    <SiderLayout loading={false} sidebar={homeSidebar}>
+    <SiderLayout
+      loading={false}
+      sidebar={homeSidebar}
+      sidebarTop={<HomeProjectReturn />}
+      hideSidebarAuxiliaryActions={Boolean(projectId)}
+    >
       <PromptThreadProvider value={providerValue}>
         <PromptThread />
       </PromptThreadProvider>

@@ -4,6 +4,7 @@ import { DrawerAction } from '@/hooks/useDrawerAction';
 import ModelForm from './form/ModelForm';
 
 type Props = DrawerAction & {
+  projectId?: number;
   submitting: boolean;
 };
 
@@ -14,8 +15,15 @@ const getDrawerTitle = (formMode: FORM_MODE, name?: string) =>
   })[formMode];
 
 export default function ModelDrawer(props: Props) {
-  const { visible, formMode, defaultValue, submitting, onClose, onSubmit } =
-    props;
+  const {
+    visible,
+    formMode,
+    defaultValue,
+    projectId,
+    submitting,
+    onClose,
+    onSubmit,
+  } = props;
   const [form] = Form.useForm();
 
   const afterVisibleChange = (visible: boolean) => {
@@ -59,7 +67,12 @@ export default function ModelDrawer(props: Props) {
         </Space>
       }
     >
-      <ModelForm formMode={formMode} form={form} defaultValue={defaultValue} />
+      <ModelForm
+        formMode={formMode}
+        form={form}
+        defaultValue={defaultValue}
+        projectId={projectId}
+      />
     </Drawer>
   );
 }

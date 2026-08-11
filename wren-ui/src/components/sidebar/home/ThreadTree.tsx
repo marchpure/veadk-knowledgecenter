@@ -42,6 +42,7 @@ interface Props {
   threads: ThreadData[];
   selectedKeys: React.Key[];
   onSelect: (selectKeys: React.Key[], info: any) => void;
+  onNewThread?: () => void;
   onRename: (id: string, newName: string) => Promise<void>;
   onDeleteThread: (id: string) => Promise<void>;
 }
@@ -53,6 +54,7 @@ export default function ThreadTree(props: Props) {
     threads = [],
     selectedKeys,
     onSelect,
+    onNewThread,
     onRename,
     onDeleteThread,
   } = props;
@@ -67,7 +69,9 @@ export default function ThreadTree(props: Props) {
           <GroupActionButton
             size="small"
             icon={<PlusOutlined />}
-            onClick={() => router.push(Path.Home)}
+            onClick={() =>
+              onNewThread ? onNewThread() : router.push(Path.Home)
+            }
           >
             New
           </GroupActionButton>
