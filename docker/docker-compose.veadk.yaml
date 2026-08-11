@@ -1,0 +1,28 @@
+services:
+  wren-engine:
+    environment:
+      ENV_MAX_HEAP_SIZE: ${WREN_ENGINE_MAX_HEAP_SIZE:-1024m}
+    ports:
+      - ${WREN_ENGINE_FORWARD_PORT:-18181}:${WREN_ENGINE_PORT}
+
+  ibis-server:
+    ports:
+      - ${IBIS_SERVER_FORWARD_PORT:-18101}:${IBIS_SERVER_PORT}
+
+  wren-ai-service:
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      WREN_UI_ENDPOINT: http://wren-ui:${WREN_UI_PORT:-3000}
+
+  wren-ui:
+    image: veadk-knowledgecenter-wren-ui:local
+    build:
+      context: ../wren-ui
+      dockerfile: Dockerfile
+    environment:
+      DBGPT_API_BASE_URL: ${DBGPT_API_BASE_URL:-http://host.docker.internal:5670}
+      WREN_SAMPLE_DATA_HOST_DIR: /app/sample-data
+      WREN_SAMPLE_DATA_ENGINE_DIR: /usr/src/app/data/sample-data
+    volumes:
+      - data:/app/data
+      - ${PROJECT_DIR}/data/sample-data:/app/sample-data
