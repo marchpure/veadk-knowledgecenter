@@ -39,9 +39,11 @@ import { DbgptApp, DbgptResourceOption, fetchDbgpt } from '@/lib/dbgpt';
 import {
   AppChatResult,
   DbgptRuntimeEvent,
+  buildDbgptHistoryRounds,
   createAppDialogue,
   createConversationShareLink,
   fetchAppByCode,
+  fetchConversationHistory,
   getApiInvocationEndpoint,
   getApiInvocationPayload,
   getAppActionHint,
@@ -595,6 +597,55 @@ const readStoredSessions = (appCode: string): RuntimeSession[] => {
   }
 };
 
+const reconcileRouteSession = (
+  stored: RuntimeSession[],
+  routeSessionId: string,
+  routeConvUid: string,
+) => {
+  if (routeSessionId) {
+    const matchedBySession = stored.find((item) => item.id === routeSessionId);
+    if (matchedBySession) {
+      return {
+        sessions: stored.map((item) =>
+          item.id === routeSessionId && routeConvUid && item.convUid !== routeConvUid
+            ? { ...item, convUid: routeConvUid }
+            : item,
+        ),
+        selected: {
+          ...matchedBySession,
+          convUid: routeConvUid || matchedBySession.convUid,
+        },
+      };
+    }
+    const routeSession = createRuntimeSession(routeConvUid || undefined);
+    routeSession.id = routeSessionId;
+    return {
+      sessions: [routeSession, ...stored],
+      selected: routeSession,
+    };
+  }
+
+  if (routeConvUid) {
+    const matchedByConvUid = stored.find(
+      (item) => item.convUid === routeConvUid,
+    );
+    if (matchedByConvUid) {
+      return { sessions: stored, selected: matchedByConvUid };
+    }
+    const routeSession = createRuntimeSession(routeConvUid);
+    return {
+      sessions: [routeSession, ...stored],
+      selected: routeSession,
+    };
+  }
+
+  const selected = stored[0] || createRuntimeSession();
+  return {
+    sessions: stored.length ? stored : [selected],
+    selected,
+  };
+};
+
 const writeStoredSessions = (appCode: string, sessions: RuntimeSession[]) => {
   if (typeof window === 'undefined' || !appCode) return;
   window.localStorage.setItem(
@@ -608,6 +659,40 @@ const getSessionTitle = (question: string) => {
   if (!normalized) return 'New conversation';
   return normalized.length > 36 ? `${normalized.slice(0, 36)}...` : normalized;
 };
+
+const createMessagesFromDbgptHistory = (
+  rounds: ReturnType<typeof buildDbgptHistoryRounds>,
+): RuntimeMessage[] =>
+  rounds.flatMap((round, index) => {
+    const createdAt =
+      round.createdAt || new Date(Date.now() - (rounds.length - index)).toISOString();
+    const messageBaseId = `${round.order || index + 1}-${createdAt}`;
+    return [
+      {
+        id: `${messageBaseId}-user`,
+        role: 'user' as const,
+        content: round.question,
+        createdAt,
+      },
+      {
+        id: `${messageBaseId}-assistant`,
+        role: 'assistant' as const,
+        question: round.question,
+        content: round.answer.content,
+        pending: false,
+        localRuntime: false,
+        runtime: round.answer.runtime,
+        createdAt,
+      },
+    ];
+  });
+
+const shouldRestoreDbgptHistory = (session: RuntimeSession) =>
+  Boolean(
+    session.convUid &&
+      !isLocalApplicationConversationId(session.convUid) &&
+      (!session.messages.length || session.messages.some((item) => item.pending)),
+  );
 
 const normalizeCell = (value: unknown) => {
   if (value === null || value === undefined) return '';
@@ -1210,17 +1295,11 @@ export default function ApplicationRunPage() {
     if (!router.isReady || !appCode) return;
     if (loadedSessionsAppCodeRef.current === appCode) return;
     const stored = readStoredSessions(appCode);
-    const selected =
-      stored.find((item) => item.id === initialSessionId) ||
-      stored.find((item) => item.convUid === initialConvUid) ||
-      stored[0] ||
-      createRuntimeSession(initialConvUid || undefined);
-    const nextSessions = stored.length
-      ? stored
-      : [selected];
-    if (initialConvUid && !selected.convUid) {
-      selected.convUid = initialConvUid;
-    }
+    const { sessions: nextSessions, selected } = reconcileRouteSession(
+      stored,
+      initialSessionId,
+      initialConvUid,
+    );
     setSessions(nextSessions);
     setActiveSessionId(selected.id);
     setRuntimeResource(selected.resource || '');
@@ -1247,6 +1326,107 @@ export default function ApplicationRunPage() {
     if (!sessionsReady || !appCode) return;
     writeStoredSessions(appCode, sessions);
   }, [appCode, sessions, sessionsReady]);
+
+  useEffect(() => {
+    if (
+      !sessionsReady ||
+      running ||
+      !activeSession ||
+      !shouldRestoreDbgptHistory(activeSession)
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    const targetSessionId = activeSession.id;
+    const targetConvUid = activeSession.convUid;
+    const hadPending = activeSession.messages.some((item) => item.pending);
+
+    const loadHistory = async () => {
+      if (!targetConvUid) return;
+      const history = hadPending
+        ? await waitForConversationHistory(targetConvUid, {
+            minMessages: 2,
+            timeoutMs: 8000,
+          })
+        : await fetchConversationHistory(targetConvUid).catch(() => []);
+      if (cancelled) return;
+
+      const rounds = buildDbgptHistoryRounds(history);
+      if (rounds.length) {
+        const restoredMessages = createMessagesFromDbgptHistory(rounds);
+        setSessions((current) =>
+          current.map((session) =>
+            session.id === targetSessionId &&
+            session.convUid === targetConvUid
+              ? {
+                  ...session,
+                  title:
+                    session.title === 'New conversation'
+                      ? getSessionTitle(rounds[0].question)
+                      : session.title,
+                  messages: restoredMessages,
+                  updatedAt: new Date().toISOString(),
+                }
+              : session,
+          ),
+        );
+        return;
+      }
+
+      if (!hadPending) return;
+      setSessions((current) =>
+        current.map((session) =>
+          session.id === targetSessionId && session.convUid === targetConvUid
+            ? {
+                ...session,
+                messages: session.messages.map((item) =>
+                  item.pending
+                    ? {
+                        ...item,
+                        content:
+                          'The previous DB-GPT request did not return a saved response. Please send the question again.',
+                        pending: false,
+                        error: true,
+                      }
+                    : item,
+                ),
+                updatedAt: new Date().toISOString(),
+              }
+            : session,
+        ),
+      );
+    };
+
+    loadHistory().catch(() => {
+      if (cancelled || !hadPending) return;
+      setSessions((current) =>
+        current.map((session) =>
+          session.id === targetSessionId && session.convUid === targetConvUid
+            ? {
+                ...session,
+                messages: session.messages.map((item) =>
+                  item.pending
+                    ? {
+                        ...item,
+                        content:
+                          'Unable to restore the previous DB-GPT response. Please send the question again.',
+                        pending: false,
+                        error: true,
+                      }
+                    : item,
+                ),
+                updatedAt: new Date().toISOString(),
+              }
+            : session,
+        ),
+      );
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSession, running, sessionsReady]);
 
   useEffect(() => {
     if (!contentRef.current) return;

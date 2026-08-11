@@ -356,6 +356,64 @@ export type AppChatResult = {
   };
 };
 
+const isDbgptHumanHistoryMessage = (message: DbgptChatHistoryMessage) => {
+  const role = String(message.role || '').toLowerCase();
+  return role === 'human' || role === 'user';
+};
+
+const createDbgptHistoryChatResult = (
+  message: DbgptChatHistoryMessage,
+): AppChatResult => {
+  const rawEvent = JSON.stringify({ vis: message.context || '' });
+  return {
+    content: summarizeDbgptStreamEvents([rawEvent]),
+    runtime: {
+      source: 'dbgpt',
+      events: normalizeDbgptRuntimeEvents([rawEvent]),
+      rawEvents: [rawEvent],
+    },
+  };
+};
+
+export type DbgptHistoryRound = {
+  question: string;
+  answer: AppChatResult;
+  createdAt?: string | null;
+  order?: number;
+};
+
+export const buildDbgptHistoryRounds = (
+  history: DbgptChatHistoryMessage[],
+): DbgptHistoryRound[] => {
+  const sortedHistory = history
+    .map((message, index) => ({ message, index }))
+    .sort((left, right) => {
+      const orderDelta =
+        (left.message.order || 0) - (right.message.order || 0);
+      return orderDelta || left.index - right.index;
+    })
+    .map((item) => item.message);
+  const rounds: DbgptHistoryRound[] = [];
+  let currentQuestion = '';
+
+  sortedHistory.forEach((message) => {
+    if (isDbgptHumanHistoryMessage(message)) {
+      currentQuestion = message.context || '';
+      return;
+    }
+    if (!message.context) return;
+    rounds.push({
+      question: currentQuestion || 'Application question',
+      answer: createDbgptHistoryChatResult(message),
+      createdAt: message.time_stamp,
+      order: message.order,
+    });
+    currentQuestion = '';
+  });
+
+  return rounds;
+};
+
 const APPLICATION_CHAT_TIMEOUT_MS = 60000;
 
 const createTimeoutSignal = (timeoutMs: number) => {
