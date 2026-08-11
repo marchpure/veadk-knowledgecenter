@@ -391,7 +391,9 @@ const inferProjectRelations = (
       if (!fromColumn.sourceColumnName.toLowerCase().endsWith('_id')) continue;
       for (const toModel of models) {
         if (fromModel.id === toModel.id) continue;
-        const toColumns = columns.filter((column) => column.modelId === toModel.id);
+        const toColumns = columns.filter(
+          (column) => column.modelId === toModel.id,
+        );
         const matchingPrimaryColumn =
           toColumns.find(
             (column) =>
